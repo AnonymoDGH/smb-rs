@@ -1,0 +1,6 @@
+prg=open("analysis/prg.bin","rb").read(); B=0x8000
+def dump(a,n=16):
+    o=a-B
+    print("%04X: %s"%(a," ".join("%02X"%b for b in prg[o:o+n])))
+for a in (0xB84B,0xB850,0xB855,0xB86D,0xB899,0xB2A4,0xB2CA,0xB2FD,0xDE24,0xDE29,0xDE39,0xDE73):
+    dump(a)

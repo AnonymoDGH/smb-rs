@@ -1,0 +1,23 @@
+{
+  "file_size": 40976,
+  "sha256": "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
+  "md5": "811b027eaf99c2def7b933c5208636de",
+  "crc32": "3337EC46",
+  "prg_banks_16k": 2,
+  "chr_banks_8k": 1,
+  "mapper": 0,
+  "mirroring": "vertical",
+  "battery": false,
+  "trainer": false,
+  "four_screen": false,
+  "prg_size": 32768,
+  "chr_size": 8192,
+  "prg_sha256": "5374abb64cfb9b5d961856c60166cedc55859164cf2b8867730e144fa2bdd594",
+  "chr_sha256": "6ae7ffd9795d670954b76c19706d4f355b53f49c38a1da14027faee2c9266f10",
+  "chr_is_ram": false,
+  "vectors": {
+    "NMI": 32898,
+    "RESET": 32768,
+    "IRQ": 65520
+  }
+}
