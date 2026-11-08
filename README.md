@@ -1,5 +1,7 @@
 # smb-rs — Emulador NES + Super Mario Bros. RE + IA
 
+> **Español** (este archivo) | [English](README.en.md)
+
 Emulador de NES escrito desde cero en Rust para **ejecutar y reversear la ROM original de Super Mario Bros. (World)**. No es un clon de niveles: el juego corre instrucción por instrucción sobre una CPU 6502 y un PPU 2C02 emulados.
 
 Incluye:

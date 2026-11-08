@@ -1,5 +1,7 @@
 # IA — Red neuroevolutiva (train / watchall)
 
+> [English](README.md) | **Español** (este archivo)
+
 Entrenador de alto rendimiento en `src/bin/train.rs` (~1200 líneas) + visor multicuadrícula `src/bin/watchall.rs`.
 
 ## Arquitectura (en `train.rs`)
