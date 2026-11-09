@@ -129,6 +129,24 @@ Diagnose in `out/tricks_audit.log` (frame, hex nibble `$06..$09`, subpixel `$070
 python tools\make_video.py out out/trick.mp4
 ```
 
+### `deepscan` — deep route scanner (map + plan + beam)
+
+Maps 1-1 from the Block Buffer (`$0500`), plans jumps with the ROM physics and searches for a fast route with **real emulator rollouts**. Full guide: [`analysis/DEEPSCAN.en.md`](analysis/DEEPSCAN.en.md).
+
+```powershell
+# Snapshot determinism
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode selftest
+
+# Full map + heuristic plan
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode map --frames 4000
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
+
+# Global search (beam search over snapshots)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8
+```
+
+Outputs: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (replayable with `nesdump --script`), `route_trace.csv`, `route_telemetry.csv` and `deepscan_report.md`.
+
 ---
 
 ## 🤖 AI — neural network `train` / `watchall`

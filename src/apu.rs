@@ -209,6 +209,7 @@ impl Noise {
     }
 }
 
+#[derive(Clone)]
 pub struct Apu {
     pulse1: Pulse,
     pulse2: Pulse,
@@ -223,6 +224,20 @@ pub struct Apu {
     sample_acc: f64,
     pub samples: Vec<f32>,
     pub master_volume: f32,
+}
+
+impl Apu {
+    /// Snapshot sin el buffer de audio (no afecta a la lógica del juego).
+    pub fn save_state(&self) -> Apu {
+        let mut a = self.clone();
+        a.samples = Vec::new();
+        a
+    }
+
+    pub fn load_state(&mut self, s: &Apu) {
+        *self = s.clone();
+        self.samples.clear();
+    }
 }
 
 impl Apu {

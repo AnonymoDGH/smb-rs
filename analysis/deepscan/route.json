@@ -1,0 +1,24 @@
+{
+  "rom_sha256": "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
+  "mode": "global_beam",
+  "beam_width": 8,
+  "stride": 8,
+  "max_frames": 1800,
+  "goal_x": 3160,
+  "time_weight": 0.7,
+  "boot_frames": 240,
+  "level_frames": 1426,
+  "total_frames": 1666,
+  "x": 3161,
+  "y": 152,
+  "reached_goal": true,
+  "rollouts": 2868,
+  "nodes": 477,
+  "files": {
+    "script": "route_script.txt",
+    "trace": "route_trace.csv",
+    "telemetry": "route_telemetry.csv",
+    "map": "level_map.json",
+    "map_svg": "level_map.svg"
+  }
+}

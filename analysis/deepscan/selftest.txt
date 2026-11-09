@@ -1,0 +1,4 @@
+# deepscan selftest
+
+- [PASS] replay desde inicio: 96d4fedbe7ce967b vs 96d4fedbe7ce967b
+- [PASS] replay desde el aire: 6eb36e63e7dc5567 vs 6eb36e63e7dc5567

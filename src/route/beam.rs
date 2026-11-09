@@ -1,0 +1,539 @@
+//! Búsqueda en haz (beam search) sobre rollouts reales del emulador.
+//!
+//! Cada nodo guarda un `ConsoleSnapshot` determinista y la secuencia de
+//! botones que llevó hasta él. En cada paso se prueban acciones macro
+//! (correr, saltar con distintos holds de A, frenar, esperar) y se conservan
+//! los `beam_width` estados con mejor puntuación. La puntuación premia avanzar
+//! en X y castiga el tiempo, así que la ruta encontrada es una ruta rápida,
+//! no solo una ruta que llega.
+//!
+//! Es la pieza "empírica": no confía en el modelo de física, ejecuta el juego.
+
+use crate::console::{
+    Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_LEFT, BUTTON_RIGHT,
+};
+
+#[derive(Clone, Copy, Debug)]
+enum Action {
+    Run(u32),
+    Jump(u8),
+    /// Salto vertical (sin RIGHT) y luego avance: sirve para subir un escalón
+    /// que está justo encima de Mario, donde un salto hacia delante choca.
+    JumpUp(u8),
+    /// Retrocede `back` frames y luego corre+salta: carrerilla para muros
+    /// pegados donde el beam se queda sin espacio.
+    BackJump(u32, u8),
+    Wait(u32),
+    Brake(u32),
+    Moonwalk(u32),
+}
+
+#[derive(Clone)]
+struct Node {
+    snap: ConsoleSnapshot,
+    frame: u32,
+    x: i32,
+    y: i32,
+    vx: i32,
+    state: u8,
+    on_ground: bool,
+    inputs: Vec<u8>,
+    score: f64,
+    dead: bool,
+    reached_goal: bool,
+    stuck_frames: u32,
+    last_x: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct BeamConfig {
+    pub beam_width: usize,
+    pub max_frames: u32,
+    pub stride: u32,
+    pub goal_x: i32,
+    pub max_rollout: u32,
+    pub time_weight: f64,
+    pub verbose: bool,
+}
+
+impl Default for BeamConfig {
+    fn default() -> Self {
+        Self {
+            beam_width: 24,
+            max_frames: 4000,
+            stride: 6,
+            goal_x: 3160,
+            max_rollout: 60,
+            // Peso bajo: el beam debe priorizar avanzar; el desempate final
+            // entre rutas que llegan a la bandera ya lo hace `best_goal` por
+            // número de frames.
+            time_weight: 0.7,
+            verbose: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BeamTrace {
+    pub step: u32,
+    pub frame: u32,
+    pub x: i32,
+    pub y: i32,
+    pub vx: i32,
+    pub score: f64,
+    pub beam_len: usize,
+    pub goal_frame: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BeamResult {
+    /// Botones frame a frame desde el inicio del nivel (sin el boot).
+    pub level_inputs: Vec<u8>,
+    /// Botones desde power-on (boot + nivel). Listo para `nesdump --script`.
+    pub inputs: Vec<u8>,
+    /// Frames de nivel hasta el mejor estado.
+    pub frames: u32,
+    /// Frames de boot (título -> nivel).
+    pub boot_frames: u32,
+    pub x: i32,
+    pub y: i32,
+    pub reached_goal: bool,
+    pub trace: Vec<BeamTrace>,
+    pub rollouts: u64,
+    pub nodes: u64,
+}
+
+struct State {
+    x: i32,
+    y: i32,
+    /// `Player_Y_HighPos` ($0B): 1 = Mario ha caído por debajo del nivel.
+    /// El byte bajo solo no sirve (un salto alto puede dar 255 arriba).
+    y_high: u8,
+    vx: i32,
+    state: u8,
+    on_ground: bool,
+    lives: u8,
+    op: u8,
+    timer: u8,
+    sub: u8,
+}
+
+fn read_state(con: &Console) -> State {
+    let r = &con.bus.ram;
+    let x = (r[0x006D] as i32) * 256 + (r[0x0086] as i32);
+    State {
+        x,
+        y: r[0x00CE] as i32,
+        y_high: r[0x000B],
+        vx: (r[0x0057] as i8) as i32,
+        state: r[0x001D],
+        on_ground: r[0x001D] == 0,
+        lives: r[0x075A],
+        op: r[0x0770],
+        timer: r[0x07F8],
+        sub: r[0x000E],
+    }
+}
+
+fn bcd_to_dec(b: u8) -> i32 {
+    ((b >> 4) as i32) * 10 + (b & 0x0F) as i32
+}
+
+/// Arranca el juego desde power-on hasta el frame 1 del nivel 1-1.
+/// Devuelve el snapshot inicial y la secuencia de botones usada.
+pub fn boot_to_level(con: &mut Console, max_frames: u32) -> Option<(ConsoleSnapshot, Vec<u8>)> {
+    let mut inputs = Vec::new();
+    for f in 0..max_frames {
+        let r = &con.bus.ram;
+        let op = r[0x0770];
+        let timer = bcd_to_dec(r[0x07F8]);
+        let sub = r[0x000E];
+        let x = (r[0x006D] as i32) * 256 + (r[0x0086] as i32);
+        let on_ground = r[0x001D] == 0;
+        if op == 0x01 && (1..=3).contains(&timer) && sub == 0x08 && x > 30 && on_ground {
+            return Some((con.snapshot(), inputs));
+        }
+        let b = if f % 30 < 2 { crate::console::BUTTON_START } else { 0 };
+        inputs.push(b);
+        con.set_buttons(0, b);
+        if !con.step_frame() {
+            return None;
+        }
+        con.bus.apu.samples.clear();
+    }
+    None
+}
+
+fn build_sequence(action: Action, prev_a: bool, cfg: &BeamConfig) -> Vec<u8> {
+    let mut seq = Vec::new();
+    match action {
+        Action::Run(n) => {
+            for _ in 0..n {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::Jump(hold) => {
+            if prev_a {
+                // Flanco limpio: SMB1 exige A=0 en el frame anterior.
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+            for _ in 0..hold.max(1) {
+                seq.push(BUTTON_RIGHT | BUTTON_B | BUTTON_A);
+            }
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::JumpUp(hold) => {
+            if prev_a {
+                seq.push(BUTTON_B);
+                seq.push(BUTTON_B);
+            }
+            // Sube en vertical y solo avanza al final del impulso.
+            for _ in 0..hold.max(1) {
+                seq.push(BUTTON_B | BUTTON_A);
+            }
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::BackJump(back, hold) => {
+            for _ in 0..back {
+                seq.push(BUTTON_LEFT);
+            }
+            seq.push(BUTTON_RIGHT | BUTTON_B);
+            for _ in 0..hold.max(1) {
+                seq.push(BUTTON_RIGHT | BUTTON_B | BUTTON_A);
+            }
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::Wait(n) => {
+            for _ in 0..n {
+                seq.push(0);
+            }
+        }
+        Action::Brake(n) => {
+            for _ in 0..n {
+                seq.push(BUTTON_LEFT | BUTTON_B);
+            }
+        }
+        Action::Moonwalk(n) => {
+            seq.push(BUTTON_LEFT | BUTTON_RIGHT | BUTTON_B);
+            for _ in 1..n {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+    }
+    seq
+}
+
+fn rollout(
+    con: &mut Console,
+    parent: &Node,
+    action: Action,
+    cfg: &BeamConfig,
+    start_lives: u8,
+) -> Node {
+    con.restore(&parent.snap);
+    let mut child = parent.clone();
+    child.dead = false;
+    child.reached_goal = false;
+    let prev_a = parent
+        .inputs
+        .last()
+        .map(|b| b & BUTTON_A != 0)
+        .unwrap_or(false);
+    let seq = build_sequence(action, prev_a, cfg);
+    let mut frames_done = 0u32;
+    // Para BackJump, los primeros frames son de retroceso en el suelo: no se
+    // puede cortar el rollout por "ya está en el suelo" hasta después del salto.
+    let jump_grace = match action {
+        Action::BackJump(back, _) => back + 4,
+        Action::Jump(_) | Action::JumpUp(_) => 4,
+        _ => u32::MAX,
+    };
+
+    for b in seq {
+        con.set_buttons(0, b);
+        if !con.step_frame() {
+            child.dead = true;
+            break;
+        }
+        con.bus.apu.samples.clear();
+        child.inputs.push(b);
+        child.frame += 1;
+        frames_done += 1;
+
+        let s = read_state(con);
+        child.x = s.x;
+        child.y = s.y;
+        child.vx = s.vx;
+        child.state = s.state;
+        child.on_ground = s.on_ground;
+
+        if s.lives < start_lives {
+            child.dead = true;
+            break;
+        }
+        if s.op != 0x01 {
+            if s.op == 0x02 || s.state == 3 || s.sub == 4 || s.sub == 5 {
+                child.reached_goal = true;
+            } else {
+                child.dead = true;
+            }
+            break;
+        }
+        if s.timer == 0 {
+            child.dead = true;
+            break;
+        }
+        if s.y_high == 1 {
+            child.dead = true;
+            break;
+        }
+        if s.x >= cfg.goal_x || s.state == 3 || s.sub == 4 || s.sub == 5 {
+            child.reached_goal = true;
+            break;
+        }
+
+        if s.x > child.last_x + 1 {
+            child.last_x = s.x;
+            child.stuck_frames = 0;
+        } else {
+            child.stuck_frames += 1;
+        }
+        if child.stuck_frames > 120 {
+            child.dead = true;
+            break;
+        }
+
+        if frames_done > jump_grace && s.on_ground {
+            break; // aterrizaje: decisión siguiente
+        }
+    }
+
+    child.snap = con.snapshot();
+    child.score = child.x as f64 - cfg.time_weight * child.frame as f64
+        + 0.4 * child.vx as f64
+        + if child.on_ground { 2.0 } else { 0.0 };
+    child
+}
+
+/// Búsqueda en haz desde un snapshot al inicio del nivel.
+pub fn beam_search(
+    con: &mut Console,
+    start: &ConsoleSnapshot,
+    cfg: &BeamConfig,
+) -> BeamResult {
+    con.restore(start);
+    let s0 = read_state(con);
+    let start_lives = s0.lives;
+    let root = Node {
+        snap: start.clone(),
+        frame: 0,
+        x: s0.x,
+        y: s0.y,
+        vx: s0.vx,
+        state: s0.state,
+        on_ground: s0.on_ground,
+        inputs: Vec::new(),
+        score: 0.0,
+        dead: false,
+        reached_goal: false,
+        stuck_frames: 0,
+        last_x: s0.x,
+    };
+
+    let mut beam = vec![root];
+    let mut best_goal: Option<Node> = None;
+    let mut best_alive: Option<Node> = None;
+    let mut best_dead: Option<Node> = None;
+    let mut trace = Vec::new();
+    let mut rollouts = 0u64;
+    let mut nodes = 0u64;
+
+    let max_steps = (cfg.max_frames as usize).saturating_mul(2).min(6000);
+    for step in 0..max_steps {
+        if beam.is_empty() {
+            break;
+        }
+        if beam.iter().all(|n| n.frame >= cfg.max_frames) {
+            break;
+        }
+
+        let mut children = Vec::new();
+        for node in &beam {
+            let actions = if node.on_ground {
+                vec![
+                    Action::Jump(26),
+                    Action::Jump(20),
+                    Action::Jump(14),
+                    Action::Jump(8),
+                    Action::JumpUp(26),
+                    Action::JumpUp(20),
+                    Action::BackJump(14, 26),
+                    Action::BackJump(28, 26),
+                    Action::Run(cfg.stride),
+                    Action::Wait(cfg.stride),
+                    Action::Brake(cfg.stride),
+                    Action::Moonwalk(cfg.stride),
+                ]
+            } else {
+                vec![
+                    Action::Run(cfg.stride),
+                    Action::Wait(cfg.stride),
+                    Action::Brake(cfg.stride),
+                ]
+            };
+            for action in actions {
+                let child = rollout(con, node, action, cfg, start_lives);
+                rollouts += 1;
+                if child.reached_goal {
+                    if best_goal
+                        .as_ref()
+                        .map_or(true, |g| child.frame < g.frame)
+                    {
+                        best_goal = Some(child);
+                    }
+                    continue;
+                }
+                if child.dead {
+                    if best_dead.as_ref().map_or(true, |b| child.x > b.x) {
+                        best_dead = Some(child);
+                    }
+                    continue;
+                }
+                if best_alive.as_ref().map_or(true, |b| child.x > b.x) {
+                    best_alive = Some(child.clone());
+                }
+                children.push(child);
+            }
+        }
+
+        if children.is_empty() {
+            break;
+        }
+        children.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut seen = std::collections::HashSet::new();
+        let mut next = Vec::with_capacity(cfg.beam_width);
+        for child in children {
+            let last_a = child
+                .inputs
+                .last()
+                .map(|b| b & BUTTON_A != 0)
+                .unwrap_or(false);
+            let key = (
+                child.x / 8,
+                child.y / 8,
+                child.vx / 4,
+                child.state,
+                child.on_ground,
+                last_a,
+            );
+            if seen.insert(key) {
+                next.push(child);
+                if next.len() >= cfg.beam_width {
+                    break;
+                }
+            }
+        }
+        nodes += next.len() as u64;
+        beam = next;
+
+        if let Some(best) = beam.first() {
+            trace.push(BeamTrace {
+                step: step as u32,
+                frame: best.frame,
+                x: best.x,
+                y: best.y,
+                vx: best.vx,
+                score: best.score,
+                beam_len: beam.len(),
+                goal_frame: best_goal.as_ref().map(|g| g.frame),
+            });
+            if cfg.verbose && step % 20 == 0 {
+                eprintln!(
+                    "[beam] step={step:3} best_f={:4} x={:4} y={:3} vx={:2} score={:8.1} beam={:2} goal={:?}",
+                    best.frame,
+                    best.x,
+                    best.y,
+                    best.vx,
+                    best.score,
+                    beam.len(),
+                    best_goal.as_ref().map(|g| g.frame)
+                );
+            }
+        }
+
+        if let Some(g) = &best_goal {
+            let can_beat = beam.iter().any(|n| {
+                n.frame as f64 + ((cfg.goal_x - n.x).max(0) as f64 / 2.5) < g.frame as f64
+            });
+            if !can_beat {
+                break;
+            }
+        }
+    }
+
+    let best = best_goal
+        .or(best_alive)
+        .or(best_dead)
+        .or_else(|| beam.into_iter().max_by_key(|n| n.x))
+        .expect("beam vacío");
+
+    BeamResult {
+        level_inputs: best.inputs.clone(),
+        inputs: best.inputs,
+        frames: best.frame,
+        boot_frames: 0,
+        x: best.x,
+        y: best.y,
+        reached_goal: best.reached_goal,
+        trace,
+        rollouts,
+        nodes,
+    }
+}
+
+/// Convierte una secuencia de botones frame a frame en eventos
+/// `frame:boton:valor` para `nesdump --script`.
+pub fn inputs_to_script(inputs: &[u8]) -> String {
+    let pairs = [
+        (BUTTON_A, "a"),
+        (BUTTON_B, "b"),
+        (crate::console::BUTTON_SELECT, "select"),
+        (crate::console::BUTTON_START, "start"),
+        (crate::console::BUTTON_UP, "up"),
+        (crate::console::BUTTON_DOWN, "down"),
+        (BUTTON_LEFT, "left"),
+        (BUTTON_RIGHT, "right"),
+    ];
+    let mut events = Vec::new();
+    let mut prev = 0u8;
+    for (frame, &b) in inputs.iter().enumerate() {
+        if b == prev {
+            continue;
+        }
+        for (mask, name) in pairs {
+            if (b & mask) != (prev & mask) {
+                events.push(format!("{frame}:{name}:{}", if b & mask != 0 { 1 } else { 0 }));
+            }
+        }
+        prev = b;
+    }
+    events.join(",")
+}

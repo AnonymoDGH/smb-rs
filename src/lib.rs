@@ -9,9 +9,10 @@ pub mod console;
 pub mod cpu;
 pub mod pngout;
 pub mod ppu;
+pub mod route;
 
 pub use cartridge::Cartridge;
 pub use console::{
-    Console, BUTTON_A, BUTTON_B, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_SELECT,
-    BUTTON_START, BUTTON_UP,
+    Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT,
+    BUTTON_SELECT, BUTTON_START, BUTTON_UP,
 };

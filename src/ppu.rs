@@ -429,3 +429,86 @@ fn flip_byte(mut b: u8) -> u8 {
     b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
     b
 }
+
+// --------------------------------------------------------------------------- //
+// Snapshot del PPU (sin framebuffer) para búsqueda con rollouts.
+// Se captura SIEMPRE en un límite de frame (después de `Console::step_frame`).
+// --------------------------------------------------------------------------- //
+
+/// Estado completo del 2C02 excepto el framebuffer y los buffers de scanline
+/// (`line_bg`, `sprite0_mask`), que son scratch y se regeneran al renderizar.
+#[derive(Clone)]
+pub struct PpuState {
+    pub vram: [u8; 4096],
+    pub palette: [u8; 32],
+    pub oam: [u8; 256],
+    pub oam_addr: u8,
+    pub ctrl: u8,
+    pub mask: u8,
+    pub status: u8,
+    pub v: u16,
+    pub t: u16,
+    pub fine_x: u8,
+    pub w: bool,
+    pub read_buffer: u8,
+    pub scanline: u16,
+    pub dot: u16,
+    pub frame_ready: bool,
+    pub nmi: bool,
+    pub frame_count: u64,
+    pub sprite0_hit_at: i32,
+}
+
+impl Ppu {
+    /// Captura el estado del PPU. Llamar solo entre frames.
+    pub fn save_state(&self) -> PpuState {
+        PpuState {
+            vram: self.vram,
+            palette: self.palette,
+            oam: self.oam,
+            oam_addr: self.oam_addr,
+            ctrl: self.ctrl,
+            mask: self.mask,
+            status: self.status,
+            v: self.v,
+            t: self.t,
+            fine_x: self.fine_x,
+            w: self.w,
+            read_buffer: self.read_buffer,
+            scanline: self.scanline,
+            dot: self.dot,
+            frame_ready: self.frame_ready,
+            nmi: self.nmi,
+            frame_count: self.frame_count,
+            sprite0_hit_at: self.sprite0_hit_at,
+        }
+    }
+
+    /// Restaura un estado capturado en un límite de frame. El framebuffer
+    /// actual se conserva (no participa en la lógica del juego).
+    pub fn load_state(&mut self, s: &PpuState) {
+        self.vram = s.vram;
+        self.palette = s.palette;
+        self.oam = s.oam;
+        self.oam_addr = s.oam_addr;
+        self.ctrl = s.ctrl;
+        self.mask = s.mask;
+        self.status = s.status;
+        self.v = s.v;
+        self.t = s.t;
+        self.fine_x = s.fine_x;
+        self.w = s.w;
+        self.read_buffer = s.read_buffer;
+        self.frame_count = s.frame_count;
+        self.sprite0_hit_at = s.sprite0_hit_at;
+        // Rearrancar el PPU al inicio del frame visible: si se restaura el
+        // punto exacto donde `frame_ready` acababa de subir, el siguiente
+        // `step_frame` puede salir tras 1-2 instrucciones y congelar el juego.
+        self.scanline = 0;
+        self.dot = 0;
+        self.frame_ready = false;
+        self.nmi = false;
+        self.line_bg = [0; WIDTH];
+        self.sprite0_mask = [false; WIDTH];
+    }
+}

@@ -135,6 +135,24 @@ python tools\make_video.py out out/truco.mp4
 
 `make_video.py` dibuja inputs + velocidad e incrusta audio. Ver `tools/make_video.py`.
 
+### `deepscan` — escáner profundo de rutas (mapa + plan + beam)
+
+Cartografía 1-1 desde la Block Buffer (`$0500`), planifica saltos con la física de la ROM y busca una ruta rápida con **rollouts reales del emulador**. Guía completa: [`analysis/DEEPSCAN.md`](analysis/DEEPSCAN.md).
+
+```powershell
+# Determinismo del snapshot
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode selftest
+
+# Mapa completo + plan heurístico
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode map --frames 4000
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
+
+# Búsqueda global (beam search sobre snapshots)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8
+```
+
+Salidas: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (reproducible con `nesdump --script`), `route_trace.csv`, `route_telemetry.csv` y `deepscan_report.md`.
+
 ---
 
 ## 🤖 IA — red neuronal `train` / `watchall`

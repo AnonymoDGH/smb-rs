@@ -3,7 +3,7 @@
 use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::{Bus as CpuBus, Cpu};
-use crate::ppu::Ppu;
+use crate::ppu::{Ppu, PpuState};
 
 pub const BUTTON_A: u8 = 0x01;
 pub const BUTTON_B: u8 = 0x02;
@@ -158,4 +158,51 @@ impl Console {
     pub fn framebuffer(&self) -> &[u32] {
         &self.bus.ppu.frame
     }
+
+    /// Captura un estado determinista en un límite de frame. El framebuffer
+    /// y el buffer de audio se excluyen para que el snapshot sea ligero.
+    pub fn snapshot(&self) -> ConsoleSnapshot {
+        ConsoleSnapshot {
+            cpu: self.cpu.clone(),
+            ram: self.bus.ram,
+            ppu: self.bus.ppu.save_state(),
+            apu: self.bus.apu.save_state(),
+            buttons: self.bus.buttons,
+            strobe: self.bus.strobe,
+            shift: self.bus.shift,
+            open_bus: self.bus.open_bus,
+            frames: self.frames,
+        }
+    }
+
+    /// Restaura un snapshot y deja el PPU listo para ejecutar un frame
+    /// completo en la siguiente llamada a `step_frame`.
+    pub fn restore(&mut self, s: &ConsoleSnapshot) {
+        self.cpu = s.cpu.clone();
+        self.cpu.nmi_pending = false;
+        self.cpu.irq_line = false;
+        self.bus.ram = s.ram;
+        self.bus.ppu.load_state(&s.ppu);
+        self.bus.apu.load_state(&s.apu);
+        self.bus.buttons = s.buttons;
+        self.bus.strobe = s.strobe;
+        self.bus.shift = s.shift;
+        self.bus.open_bus = s.open_bus;
+        self.frames = s.frames;
+    }
+}
+
+/// Estado completo del emulador (CPU + RAM + PPU + APU) para búsqueda por
+/// rollouts. No incluye el cartucho (inmutable) ni el framebuffer.
+#[derive(Clone)]
+pub struct ConsoleSnapshot {
+    pub cpu: Cpu,
+    pub ram: [u8; 2048],
+    pub ppu: PpuState,
+    pub apu: Apu,
+    pub buttons: [u8; 2],
+    pub strobe: bool,
+    pub shift: [u8; 2],
+    pub open_bus: u8,
+    pub frames: u64,
 }
