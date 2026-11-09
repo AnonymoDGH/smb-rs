@@ -41,6 +41,7 @@ struct Args {
     time_weight: f64,
     quiet: bool,
     script: Option<PathBuf>,
+    goal_mode: String,
 }
 
 impl Default for Args {
@@ -57,6 +58,7 @@ impl Default for Args {
             time_weight: 2.5,
             quiet: false,
             script: None,
+            goal_mode: "flagpole".to_string(),
         }
     }
 }
@@ -65,7 +67,7 @@ fn usage() {
     eprintln!(
         "Uso: deepscan <rom> <outdir> [--mode map|plan|global|probe|all|selftest]\n\
          \x20     [--frames N] [--beam N] [--stride N] [--goal-x N]\n\
-         \x20     [--max-rollout N] [--time-weight F] [--script FILE] [--quiet]\n\n\
+         \x20     [--max-rollout N] [--time-weight F] [--script FILE] [--goal-mode flagpole|warp|axe] [--quiet]\n\n\
          Ejemplos:\n\
          \x20 deepscan rom.nes out_deep --mode map\n\
          \x20 deepscan rom.nes out_deep --mode global --beam 24 --stride 6\n\
@@ -124,6 +126,12 @@ fn parse_args() -> Args {
             "--script" => {
                 i += 1;
                 a.script = raw.get(i).map(PathBuf::from);
+            }
+            "--goal-mode" => {
+                i += 1;
+                if i < raw.len() {
+                    a.goal_mode = raw[i].clone();
+                }
             }
             "--quiet" => a.quiet = true,
             _ => {}
@@ -692,7 +700,11 @@ fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
         max_rollout: args.max_rollout,
         time_weight: args.time_weight,
         verbose: !args.quiet,
-        goal_mode: smb_rs::route::GoalMode::Flagpole,
+        goal_mode: match args.goal_mode.as_str() {
+            "warp" => smb_rs::route::GoalMode::Warp,
+            "axe" => smb_rs::route::GoalMode::Axe,
+            _ => smb_rs::route::GoalMode::Flagpole,
+        },
     };
 
     let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
