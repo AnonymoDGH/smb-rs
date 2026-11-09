@@ -165,6 +165,9 @@ fn main() {
         "wall" => {
             run_wall_probe(&rom, &args.outdir);
         }
+        "warp1-2" => {
+            run_warp12_map(&rom, &sha, &args);
+        }
         "fpg" => {
             run_fpg_probe(&rom, &args.outdir);
         }
@@ -1112,6 +1115,107 @@ fn replay_route(rom: &[u8], sha: &str, args: &Args, script: &Path) {
         tricks.flagpole_y,
         tricks.flagpole_window
     );
+}
+
+fn run_warp12_map(rom: &[u8], sha: &str, args: &Args) {
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let Some((snap0, _)) = boot_to_level(&mut con, 2400) else {
+        eprintln!("warp1-2: sin boot");
+        return;
+    };
+    let inputs = parse_route_script(&args.outdir.join("route_script.txt"));
+    con.restore(&snap0);
+    let mut timer_count = 0;
+    let mut prev = String::new();
+    let mut snap12 = None;
+    let mut global = 0u32;
+    // Saltar el boot (240f): el snapshot ya esta al inicio del nivel.
+    let level_inputs = if inputs.len() > 240 { &inputs[240..] } else { &inputs[..] };
+    let mut tail: Vec<u8> = level_inputs.to_vec();
+    tail.extend(std::iter::repeat(0).take(2500));
+    for &b0 in &tail {
+        let b = if global > 1265 { 0 } else { b0 };
+        con.set_buttons(0, b);
+        con.step_frame();
+        con.bus.apu.samples.clear();
+        let r = &con.bus.ram;
+        let timer = format!("{:02X}{:02X}{:02X}", r[0x07F8], r[0x07F9], r[0x07FA]);
+        if timer != prev && timer == "040000" {
+            timer_count += 1;
+            if timer_count == 2 {
+                snap12 = Some(con.snapshot());
+                println!("warp1-2: segundo 400 en global {global}");
+                break;
+            }
+        }
+        prev = timer;
+        global += 1;
+    }
+    let snap12 = match snap12 {
+        Some(s) => s,
+        None => {
+            eprintln!("warp1-2: no llego al segundo 400");
+            return;
+        }
+    };
+    // Piloto heurístico a traves de 1-2 (underground, sin scroll vertical).
+    con.restore(&snap12);
+    // Restaurar vidas para el mapeo (el bonus largo de 1-1 quita vidas por time-up en replay).
+    con.bus.ram[0x075A] = 3;
+    let mut map = LevelMap::new(sha);
+    let mut pilot = Pilot::new();
+    let mut frames = 0u32;
+    let mut died = false;
+    for _ in 0..4000 {
+        let b = pilot.step(&con.bus.ram);
+        con.set_buttons(0, b);
+        con.step_frame();
+        con.bus.apu.samples.clear();
+        frames += 1;
+        map.ingest(&con.bus.ram, frames as u64);
+        let r = &con.bus.ram;
+        if r[0x000B] == 1 || r[0x075A] < 3 || r[0x0770] == 2 || r[0x000E] == 7 {
+            if frames <= 2 {
+                eprintln!("warp1-2 debug f={frames} y_high={} lives={} op={} sub={}", r[0x000B], r[0x075A], r[0x0770], r[0x000E]);
+            }
+            if r[0x000E] == 7 {
+                println!("warp1-2: piloto entro en tuberia f={frames} x={} $0750={:02X}", (r[0x6D] as i32)*256+r[0x86] as i32, r[0x0750]);
+            } else {
+                died = true;
+            }
+            break;
+        }
+        if r[0x001D] == 3 || r[0x000E] == 4 || r[0x000E] == 5 {
+            break;
+        }
+    }
+    std::fs::write(args.outdir.join("warp12_map.json"), map.to_json()).expect("warp12_map.json");
+    std::fs::write(args.outdir.join("warp12_map.txt"), map.to_ascii()).expect("warp12_map.txt");
+    std::fs::write(args.outdir.join("warp12_map.svg"), map.to_svg(None)).expect("warp12_map.svg");
+    println!(
+        "warp1-2: mapa {} cols, {} obstaculos, max_vs={} died={} f={}",
+        map.cols,
+        map.obstacles().len(),
+        map.max_vs,
+        died,
+        frames
+    );
+    let mut pipes = 0;
+    let mut pipe_cols: Vec<i32> = Vec::new();
+    for col in 0..map.cols as i32 {
+        for row in 0..13i32 {
+            let t = map.tile(col, row);
+            // Metatiles de tuberia en Block Buffer (TASVideos, tabla SMB).
+            if matches!(t, 0x1C | 0x1D | 0x1E | 0x1F | 0x20 | 0x21 | 0x10 | 0x11) {
+                pipes += 1;
+                if !pipe_cols.contains(&col) {
+                    pipe_cols.push(col);
+                }
+            }
+        }
+    }
+    println!("warp1-2: tiles tuberia vistos: {pipes} cols={pipe_cols:?}");
 }
 
 fn run_wall_probe(rom: &[u8], outdir: &Path) {
