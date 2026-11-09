@@ -42,6 +42,11 @@ pub struct TrickState {
     pub flagpole_score: u8,
     /// `$0756` PlayerStatus (0 = pequeño, 1 = grande, 2 = fuego).
     pub power: u8,
+    /// `AreaPointer` ($0750): destino de tubería/vid. Cambia al hacer scroll
+    /// (wrong warp / alternate pipe glitches).
+    pub area_pointer: u8,
+    /// `GameEngineSubroutine == 7` = entrada en tubería/vid.
+    pub pipe_entry: bool,
     /// Calle de la bandera: Y del slot 5 de enemigos ($00CF+5).
     pub flag_y: u8,
     pub lives: u8,
@@ -100,6 +105,8 @@ pub fn read_trick_state(con: &Console) -> TrickState {
         flagpole_y: r[0x070F],
         flagpole_score: r[0x010F],
         power: r[0x0756],
+        area_pointer: r[0x0750],
+        pipe_entry: r[0x000E] == 0x07,
         flag_y: r[0x00CF + 5],
         lives: r[0x075A],
         timer: r[0x07F8],

@@ -5,9 +5,10 @@
 //! rellenando las columnas que entran por la derecha. `deepscan` recorre el
 //! nivel una vez y fusiona cada ventana visible en un mapa absoluto.
 //!
-//! Limitación conocida (documentada): el mapeo `fila = (y_mundo - 32) / 16`
-//! asume niveles sin scroll vertical (1-1, 1-2, 4-2, 8-4...). Para niveles
-//! verticales hay que compensar con `ScreenY_Pos`/`VerticalScroll` (TODO).
+//! Scroll vertical: `VerticalScroll` (`$0740`) desplaza la ventana 13 filas del
+//! buffer. `LevelMap` lo registra (`max_vs`) para compensar coordenadas Y en
+//! niveles verticales; el apilado completo de filas (32) queda como extensión
+//! en `DEEPSCAN.md`. En 1-1 el scroll vertical es 0.
 
 use std::fmt::Write as _;
 
@@ -53,6 +54,10 @@ pub struct LevelMap {
     pub enemies: Vec<EnemySighting>,
     pub start_x: i32,
     pub flag_col: Option<usize>,
+    /// `VerticalScroll` ($0740) máximo visto. 0 = sin scroll vertical (1-1).
+    pub max_vs: u8,
+    /// Último `VerticalScroll` visto.
+    pub cur_vs: u8,
     pub min_cam_col: i32,
     pub max_cam_col: i32,
     /// Seguimiento por slot de enemigo ($000F..$0013) para registrar solo el
@@ -71,6 +76,8 @@ impl LevelMap {
             enemies: Vec::new(),
             start_x: 0,
             flag_col: None,
+            max_vs: 0,
+            cur_vs: 0,
             min_cam_col: i32::MAX,
             max_cam_col: i32::MIN,
             slot_active: [false; 5],
@@ -95,6 +102,11 @@ impl LevelMap {
         let cam_col = cam_x / TILE_PX;
         self.min_cam_col = self.min_cam_col.min(cam_col);
         self.max_cam_col = self.max_cam_col.max(cam_col);
+        // Compensación vertical: VerticalScroll ($0740).
+        self.cur_vs = ram[0x0740];
+        if self.cur_vs > self.max_vs {
+            self.max_vs = self.cur_vs;
+        }
 
         let player_x = (ram[0x006D] as i32) * 256 + (ram[0x0086] as i32);
         if self.start_x == 0 && player_x > 0 {
@@ -158,6 +170,19 @@ impl LevelMap {
         if self.flag_col.is_none() && (state == 3 || sub == 4 || sub == 5) {
             self.flag_col = Some((player_x / TILE_PX) as usize);
         }
+    }
+
+    /// Fila absoluta de un tile de buffer con scroll vertical.
+    /// `vs = $0740`; el mundo se desplaza en múltiplos de 16 px.
+    #[inline]
+    pub fn abs_row(&self, buf_row: i32) -> i32 {
+        buf_row + (self.cur_vs as i32) / TILE_PX
+    }
+
+    /// Coordenada Y de mundo (px) de una fila de buffer (0..12).
+    #[inline]
+    pub fn world_y(&self, buf_row: i32) -> i32 {
+        LEVEL_TOP_Y + (self.cur_vs as i32 & 0xF0) + buf_row * TILE_PX
     }
 
     #[inline]
