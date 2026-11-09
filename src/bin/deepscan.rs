@@ -168,6 +168,9 @@ fn main() {
         "warp1-2" => {
             run_warp12_map(&rom, &sha, &args);
         }
+        "warpbeam" => {
+            run_warp_beam(&rom, &sha, &args);
+        }
         "fpg" => {
             run_fpg_probe(&rom, &args.outdir);
         }
@@ -1115,6 +1118,62 @@ fn replay_route(rom: &[u8], sha: &str, args: &Args, script: &Path) {
         tricks.flagpole_y,
         tricks.flagpole_window
     );
+}
+
+fn run_warp_beam(rom: &[u8], sha: &str, args: &Args) {
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let Some((snap0, _)) = boot_to_level(&mut con, 2400) else {
+        eprintln!("warpbeam: sin boot");
+        return;
+    };
+    let inputs = parse_route_script(&args.outdir.join("route_script.txt"));
+    con.restore(&snap0);
+    let level_inputs = if inputs.len() > 240 { &inputs[240..] } else { &inputs[..] };
+    let mut tail: Vec<u8> = level_inputs.to_vec();
+    tail.extend(std::iter::repeat(0).take(2500));
+    let mut prev = String::new();
+    let mut snap12 = None;
+    let mut secs = 0;
+    for &b in &tail {
+        let bb = if secs > 1265 { 0 } else { b };
+        con.set_buttons(0, bb);
+        con.step_frame();
+        con.bus.apu.samples.clear();
+        let r = &con.bus.ram;
+        let timer = format!("{:02X}{:02X}{:02X}", r[0x07F8], r[0x07F9], r[0x07FA]);
+        if timer != prev && timer == "040000" && secs > 2000 {
+            snap12 = Some(con.snapshot());
+            println!("warpbeam: segundo 400 en {secs}");
+            break;
+        }
+        prev = timer;
+        secs += 1;
+    }
+    let snap12 = snap12.expect("sin segundo 400");
+    con.restore(&snap12);
+    con.bus.ram[0x075A] = 3;
+    let cfg = BeamConfig {
+        beam_width: args.beam,
+        max_frames: args.frames,
+        stride: args.stride,
+        goal_x: args.goal_x,
+        max_rollout: args.max_rollout,
+        time_weight: args.time_weight,
+        verbose: !args.quiet,
+        goal_mode: smb_rs::route::GoalMode::Warp,
+    };
+    println!("warpbeam: beam warp goal_x={} beam={} frames={}", cfg.goal_x, cfg.beam_width, cfg.max_frames);
+    let result = beam_search(&mut con, &snap12, &cfg);
+    println!(
+        "warpbeam: {}f x={} warp={} rollouts={}",
+        result.frames, result.x, result.reached_goal, result.rollouts
+    );
+    std::fs::write(
+        args.outdir.join("warp12_route_script.txt"),
+        inputs_to_script(&result.level_inputs),
+    )
+    .expect("warp12 script");
 }
 
 fn run_warp12_map(rom: &[u8], sha: &str, args: &Args) {

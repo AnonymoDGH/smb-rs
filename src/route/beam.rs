@@ -10,7 +10,7 @@
 //! Es la pieza "empírica": no confía en el modelo de física, ejecuta el juego.
 
 use crate::console::{
-    Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_LEFT, BUTTON_RIGHT,
+    Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT,
 };
 use crate::route::sensors::{is_solid, scan_environment};
 
@@ -38,6 +38,8 @@ enum Action {
     /// Pulso `L+R+B` de 1 frame y luego correr: `facing=3`, siempre fricción
     /// doble ese frame. Solo en suelo.
     LR1,
+    /// Entrada en tubería warp: mantener `DOWN` sobre la tubería (sub==7).
+    PipeDown(u32),
     /// Arranque con el truco de aceleración inversa (sección 18 del
     /// catálogo): L+R 1f, A 1f, carrera, giro de 1f sin B y salto con B.
     /// Solo se prueba en el nodo raíz.
@@ -324,6 +326,11 @@ fn build_sequence(action: Action, prev_a: bool, cfg: &BeamConfig) -> Vec<u8> {
                 seq.push(BUTTON_RIGHT | BUTTON_B);
             }
         }
+        Action::PipeDown(n) => {
+            for _ in 0..n {
+                seq.push(BUTTON_DOWN);
+            }
+        }
         Action::AccelStart => {
             // Secuencia medida en `--mode probe`: el giro en el frame 24 es
             // el que mejor X deja a los 90 frames.
@@ -533,6 +540,7 @@ pub fn beam_search(
                     Action::SubFreeze,
                     Action::Turn1,
                     Action::LR1,
+                    Action::PipeDown(cfg.stride),
                 ]
             } else {
                 vec![
