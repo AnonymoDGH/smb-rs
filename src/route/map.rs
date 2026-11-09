@@ -13,6 +13,9 @@
 use std::fmt::Write as _;
 
 pub const ROWS: usize = 13;
+/// Filas de mundo apiladas (2 pantallas + margen) para niveles verticales.
+/// En 1-1 solo se usan las 0..12 (vs=0); un nivel vertical usa filas altas.
+pub const WORLD_ROWS: usize = 32;
 pub const TILE_PX: i32 = 16;
 pub const LEVEL_TOP_Y: i32 = 32;
 
@@ -89,8 +92,8 @@ impl LevelMap {
         if cols <= self.cols {
             return;
         }
-        self.tiles.resize(cols * ROWS, 0);
-        self.seen.resize(cols * ROWS, false);
+        self.tiles.resize(cols * WORLD_ROWS, 0);
+        self.seen.resize(cols * WORLD_ROWS, false);
         self.cols = cols;
     }
 
@@ -127,9 +130,11 @@ impl LevelMap {
             let mt = mt as usize;
             let page = (mt / 16) & 1;
             let col = mt & 15;
+            let vs_row = (self.cur_vs as i32) / TILE_PX;
             for row in 0..ROWS {
                 let addr = 0x0500 + page * 208 + row * 16 + col;
-                let idx = mt * ROWS + row;
+                let wrow = (row as i32 + vs_row).clamp(0, WORLD_ROWS as i32 - 1) as usize;
+                let idx = mt * WORLD_ROWS + wrow;
                 if !self.seen[idx] {
                     self.tiles[idx] = ram[addr];
                     self.seen[idx] = true;
@@ -187,10 +192,12 @@ impl LevelMap {
 
     #[inline]
     pub fn tile(&self, col: i32, row: i32) -> u8 {
-        if col < 0 || row < 0 || col as usize >= self.cols || row as usize >= ROWS {
+        // `row` es fila de mundo (0..WORLD_ROWS-1); las filas 0..12 son el
+        // nivel 1-1 (vs=0).
+        if col < 0 || row < 0 || col as usize >= self.cols || row as usize >= WORLD_ROWS {
             return 0;
         }
-        let idx = col as usize * ROWS + row as usize;
+        let idx = col as usize * WORLD_ROWS + row as usize;
         if !self.seen[idx] {
             0
         } else {
@@ -203,7 +210,7 @@ impl LevelMap {
         if col < 0 || col as usize >= self.cols {
             return false;
         }
-        self.seen[col as usize * ROWS]
+        self.seen[col as usize * WORLD_ROWS]
     }
 
     #[inline]
@@ -230,7 +237,7 @@ impl LevelMap {
         if col < 0 || col as usize >= self.cols {
             return out;
         }
-        for row in 0..ROWS {
+        for row in 0..WORLD_ROWS {
             if !self.is_solid(col, row as i32) {
                 continue;
             }
@@ -250,7 +257,7 @@ impl LevelMap {
     }
 
     pub fn baseline_ground_row(&self) -> i32 {
-        let mut hist = [0u32; ROWS];
+        let mut hist = [0u32; WORLD_ROWS];
         for col in 0..self.cols as i32 {
             if !self.seen_col(col) || self.is_pit(col) {
                 continue;
@@ -345,7 +352,8 @@ impl LevelMap {
         let _ = writeln!(s, "  \"rom_sha256\": \"{}\",", self.rom_sha256);
         let _ = writeln!(s, "  \"level\": \"1-1\",");
         let _ = writeln!(s, "  \"cols\": {},", self.cols);
-        let _ = writeln!(s, "  \"rows\": {},", ROWS);
+        let _ = writeln!(s, "  \"rows\": {},", WORLD_ROWS);
+        let _ = writeln!(s, "  \"max_vs\": {},", self.max_vs);
         let _ = writeln!(s, "  \"tile_px\": {},", TILE_PX);
         let _ = writeln!(s, "  \"baseline_ground_row\": {},", self.baseline_ground_row());
         let _ = writeln!(s, "  \"start_x\": {},", self.start_x);
@@ -362,7 +370,7 @@ impl LevelMap {
                 s.push(',');
             }
             s.push('[');
-            for row in 0..ROWS {
+            for row in 0..WORLD_ROWS {
                 if row > 0 {
                     s.push(',');
                 }
@@ -420,7 +428,7 @@ impl LevelMap {
             }
         }
         let _ = writeln!(s, "{}", ruler);
-        for row in 0..ROWS {
+        for row in 0..WORLD_ROWS {
             let _ = write!(s, "{:2} | ", row);
             for col in 0..self.cols {
                 let ch = if self.is_coin(col as i32, row as i32) {
@@ -442,7 +450,7 @@ impl LevelMap {
         let scale = 6i32;
         let pad = 12i32;
         let w = self.cols as i32 * scale + pad * 2;
-        let h = ROWS as i32 * scale + pad * 2 + 18;
+        let h = WORLD_ROWS as i32 * scale + pad * 2 + 18;
         let baseline = self.baseline_ground_row();
         let mut s = String::new();
         let _ = writeln!(
@@ -451,7 +459,7 @@ impl LevelMap {
         );
         let _ = writeln!(s, r##"<rect width="100%" height="100%" fill="#0e0f14"/>"##);
         for col in 0..self.cols {
-            for row in 0..ROWS {
+            for row in 0..WORLD_ROWS {
                 if !self.is_solid(col as i32, row as i32) && !self.is_coin(col as i32, row as i32) {
                     continue;
                 }
@@ -485,7 +493,7 @@ impl LevelMap {
             let _ = writeln!(
                 s,
                 r##"<line x1="{x}" y1="{pad}" x2="{x}" y2="{}" stroke="#f2c94c" stroke-width="2"/>"##,
-                pad + ROWS as i32 * scale
+                pad + WORLD_ROWS as i32 * scale
             );
         }
         if self.start_x > 0 {
