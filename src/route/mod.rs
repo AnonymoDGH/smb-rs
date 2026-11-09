@@ -17,6 +17,7 @@ pub mod physics;
 pub mod pilot;
 pub mod planner;
 pub mod sensors;
+pub mod tricks;
 
 pub use beam::{
     beam_search, boot_to_level, inputs_to_script, BeamConfig, BeamResult, BeamTrace,
@@ -26,3 +27,4 @@ pub use physics::{fall_time, jump_arc, JumpArc};
 pub use pilot::Pilot;
 pub use planner::{plan_route, plan_to_json, Maneuver, ManeuverKind, RoutePlan};
 pub use sensors::{is_pit, is_solid, scan_environment, world_tile_kind, EnvScan};
+pub use tricks::{probe_start, read_trick_state, ProbeResult, ProbeSpec, TrickState};

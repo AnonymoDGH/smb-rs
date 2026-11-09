@@ -432,7 +432,7 @@ Trivial: cuando hay un agujero a la izquierda de la pantalla, mete a Mario entre
 4. Al caer, mira hacia atrás 1 frame **sin B**.
 5. Al frame siguiente, empieza a saltar de nuevo manteniendo **B** y ya tienes velocidad de correr.
 
-Sirve para empezar un nivel, acelerar tras salir de tubería y para walljump.
+Sirve para empezar un nivel, acelerar tras salir de tubería y para walljump. **Verificado en 1-1:** la mejor variante gana +11 px a los 90 frames (≈4.4 frames); ver sección 32.1.
 
 **Por qué:** En `X_Physics` (`playermove.asm`, `X_Physics` línea ~285), si `Player_State=0` (suelo) se usa `Y=1`, si no `Y=0`, con ajuste por agua y por `Left_Right_Buttons != Player_MovingDir` (salto hacia atrás aumenta Y). La fricción (`ImposeFriction`, `FrictionData` `e4 98 d0`, `MaximumLeftSpeed`/`MaximumRightSpeed` de `MaxLeftXSpdData`/`MaxRightXSpdData` `28 18 10 0c`) se duplica en giro (`ASL $0702` / `ROL $0701` cuando `PlayerFacingDir != Player_MovingDir`). El salto hacia atrás invierte `MovingDir` sin invertir `FacingDir`, así que la fricción se duplica y ganas velocidad antes.
 
@@ -571,6 +571,8 @@ El primer salto tras entrar en nivel tiene `Player_Y_MoveForce=0` y `JumpOrigin`
 
 **Botones:** tras entrar en nivel o salir de tubería, haz un salto mínimo y verás que flota un poco más que el normal. Para aprovecharlo, salta desde el suelo inmediatamente al entrar (1-1 tras tubería, sobre los dos Goombas).
 
+**Medido en 1-1:** el primer salto no es más rápido en X; saltar en el frame 0 pierde 20-35 px frente a correr 20 frames antes de saltar. No sirve para batir tiempos (ver sección 32.2).
+
 ## 30. Koopa walking in mid-air + Enemies not appearing + Whirlpools y Springs
 
 ### Koopa walking in mid-air
@@ -653,6 +655,94 @@ Y en `CheckSideMTiles` (línea 9322): si tocas un resorte por el lateral y `Anim
 | `Enemy_State` | buffer `$02Bx` | Estado enemigo (d5 stun, d7 shell) |
 | `Enemy_Flag` | buffer `$05Bx` | 1 si slot ocupado |
 | `EnemyIntervalTimer` | `$0796` | Timer de enemigo |
+
+---
+
+## 32. Verificación empírica con `deepscan` (1-1)
+
+Esta sección no es teoría: sale de ejecutar el emulador con `deepscan --mode probe` y de la ruta ganadora de `deepscan --mode global`. Los números son de la ROM `Super Mario Bros. (World).nes` (SHA-256 `f61548fd…`) y del snapshot del primer frame controlable de 1-1 (x=40, y=176).
+
+### 32.1 Arranque: aceleración inversa (sección 18)
+
+Cada prueba ejecuta un prefijo exacto y después mantiene `RIGHT+B` hasta el frame 90. `x` es la posición absoluta; el baseline es correr desde el frame 0.
+
+| prueba | x a 90f | vx | max_vx | altura | aterrizaje |
+|---|---:|---:|---:|---:|---:|
+| `accel_lr_a_turn24` | **218** | 40 | 40 | 29 | 23 |
+| `accel_lr_a_turn26` | 218 | 40 | 40 | 29 | 23 |
+| `accel_lr_a_turn28` | 217 | 40 | 40 | 29 | 23 |
+| `lr_then_run` | 209 | 40 | 40 | 0 | — |
+| `baseline_run` | 207 | 40 | 40 | 0 | — |
+| `first_jump_right_hold2` | 192 | 40 | 40 | 26 | 24 |
+| `first_jump_hold26` | 127 | 40 | 40 | 65 | 50 |
+
+**Resultado:** la mejor variante documentada gana **+11 px a los 90 frames** respecto a correr (≈4.4 frames a 2.5 px/f). No es un atajo mágico, pero es real. La secuencia medida es:
+
+```
+frame 0: L+R
+frame 1: A
+frames 2..23: RIGHT+B
+frame 24: LEFT (sin B)
+frame 25: RIGHT+B+A
+después: RIGHT+B
+```
+
+La ruta ganadora usa una variante aún más simple: **L+R+B durante 1 frame** y luego `RIGHT+B`. Esa variante llega a x=212 a los 90 frames (solo 6 px por debajo de la mejor) y fue la que eligió el beam.
+
+### 32.2 Low-gravity (sección 29)
+
+| prueba | x a 120f | altura | aterrizaje |
+|---|---:|---:|---:|
+| `first_jump_h4` | 258 | 31 | 26 |
+| `run20_jump_h4` | 260 | 34 | 49 |
+| `first_jump_h26` | 202 | 65 | 50 |
+| `run20_jump_h26` | 237 | 68 | 72 |
+
+**Resultado:** el primer salto con gravedad baja **no es más rápido en X**; de hecho, saltar en el frame 0 pierde 20-35 px frente a correr 20 frames antes de saltar. Confirma la nota de la sección 29: sirve para el TAS de "minimum presses", no para speedrun. En 1-1 conviene correr primero y saltar cuando ya hay velocidad.
+
+### 32.3 Moonwalk (sección 25)
+
+El moonwalk sostenido no aparece en la ruta óptima. Solo se usa **1 frame de L+R+B al inicio** como parte del truco de aceleración; después el beam mantiene `RIGHT+B`. Mover la pantalla sin input no ayuda en 1-1 porque la cámara ya avanza con Mario.
+
+### 32.4 Walljump (sección 13) y flagpole glitch (sección 2)
+
+- **Walljump:** no se usa. En 1-1 las paredes útiles (tubería de 4 tiles en x≈912, escaleras de x≈2144) se superan antes con un salto corriendo a 2.5 px/f. El walljump exige chocar y perder velocidad; no compensa.
+- **FPG/FFPG:** la ruta toca el mástil en **1266 frames de nivel (21.07 s a 60.0988 fps)**. Ese tiempo termina en el **frame de contacto** con el mástil, que es el que cuenta en el récord de 1-1 (21.43 s ≈ 1288 frames). El FPG/FFPG solo acelera la animación posterior (slide + caminata al castillo), así que **no mejora el tiempo de toque**. Si la categoría midiera el nivel completo hasta el castillo, el FPG sí ahorraría ~1-3 s; habría que añadir esa variante al beam y medirla aparte.
+
+### 32.5 Resultado de la ruta
+
+| métrica | valor |
+|---|---:|
+| Frames de nivel | **1266** |
+| Tiempo a 60.0988 fps | **21.07 s** |
+| Récord objetivo | 21.43 s (1288 frames) |
+| Margen | **22 frames (0.37 s)** |
+| Beam / stride / max_rollout | 8 / 8 / 40 |
+| `time_weight` | 2.5 (= velocidad máxima) |
+| Rollouts / nodos | 9154 / 880 |
+| X final | 3161 (nybble bajo 9, ventana del mástil) |
+| Estado final | `Player_State=3` (flagpole) |
+| Velocidad máxima | frame 33 (40 = 2.5 px/f) |
+| Fricción inversa | 44 frames (arranque + giro) |
+| Moonwalk (L+R) | 1 frame (salida) |
+| Saltos / aire | 36 / 937 frames |
+
+El perfil de velocidad solo tiene un tramo lento: la aceleración inicial (frames 1-21, media 0.84 px/f). A partir del frame 33 la velocidad es 40 (2.5 px/f) hasta el mástil. La diferencia con el mínimo teórico (3121 px / 2.5 = 1248 frames) son ~18 frames, todos de la aceleración inicial. Para bajar de 1266 habría que romper la aceleración desde 0, no la física del resto del nivel.
+
+### 32.6 Reproducir
+
+```powershell
+# Probe de trucos de arranque
+.\target\release\deepscan.exe "Super Mario Bros. (World).nes" analysis\deepscan --mode probe
+
+# Ruta global (la que batió el récord)
+.\target\release\deepscan.exe "Super Mario Bros. (World).nes" analysis\deepscan --mode global `
+  --beam 8 --stride 8 --max-rollout 40 --time-weight 2.5 --frames 1800
+
+# Replay determinista del script guardado
+.\target\release\deepscan.exe "Super Mario Bros. (World).nes" analysis\deepscan --mode replay `
+  --script analysis\deepscan\route_script.txt
+```
 
 ---
 

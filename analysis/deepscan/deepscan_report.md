@@ -10,34 +10,46 @@
 - Columnas cartografiadas: 206
 - Filas: 13 (y=32..239)
 - Suelo base: fila 11
-- Enemigos vistos: 15
+- Enemigos vistos: 16
 - Obstáculos: 36
 - Bandera: col Some(197)
 
 - Pozos: 4
 - Muros/tuberías/escalones: 32
 
-## Recorrido (replay determinista)
+## Recorrido (piloto o replay)
 
-- Frames de nivel: 1425 (el nodo del beam se marca en 1426; el replay
-  dispara el estado de mástil un frame antes)
+En `map`/`plan` son estadísticas del piloto base; en `global` son del replay determinista de la ruta encontrada por el beam.
+
+- Frames: 1265
 - X final: 3161
 - Bandera: true
 
+## Trucos detectados
+
+- Velocidad máxima: 40 (frame 33)
+- Frames a velocidad tope: 1232
+- Fricción inversa: 44 frames
+- Moonwalk (L+R): 1 frames
+- Aire: 937 frames
+- Saltos: 36
+- Primer salto: frame Some(2), airtime Some(20)
+- Flagpole: frame Some(1265), Y=144, score=4, ventana=sí
+
 ## Búsqueda global (beam)
 
-- Beam: 8 | stride: 8 | max_rollout: 40 | time_weight: 0.7
-- Frames de nivel: 1426 (23.73s)
-- Frames totales (con boot): 1666
-- X final: 3161 | Y: 152
+- Beam: 8 | stride: 8 | max_rollout: 40 | time_weight: 2.5
+- Frames de nivel: 1266 (21.07s)
+- Frames totales (con boot): 1506
+- X final: 3161 | Y: 144
 - Bandera: true
-- Rollouts: 2868
-- Nodos conservados: 477
+- Rollouts: 9154
+- Nodos conservados: 880
 
 ## Reproducir
 
 ```powershell
-.\target\release\nesdump.exe "C:\Users\USUARIO\Downloads\Super Mario Bros. (World)\Super Mario Bros. (World).nes" out_replay --frames 1666 --script (Get-Content out_deep_full2\route_script.txt -Raw)
+.\target\release\nesdump.exe "C:\Users\USUARIO\Downloads\Super Mario Bros. (World)\Super Mario Bros. (World).nes" out_replay --frames 1506 --script (Get-Content analysis\deepscan\tricks\route_script.txt -Raw)
 ```
 
 ## Limitaciones

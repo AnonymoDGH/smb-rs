@@ -141,11 +141,14 @@ Maps 1-1 from the Block Buffer (`$0500`), plans jumps with the ROM physics and s
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode map --frames 4000
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
 
-# Global search (beam search over snapshots)
-.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8
+# Global search (beam search over snapshots) — 1-1 in 1271 frames (21.15 s)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8 --max-rollout 40 --time-weight 2.5
+
+# Empirical trick probes (reverse acceleration, low gravity, reverse friction)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode probe
 ```
 
-Outputs: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (replayable with `nesdump --script`), `route_trace.csv`, `route_telemetry.csv` and `deepscan_report.md`.
+Outputs: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (replayable with `nesdump --script`), `route_trace.csv`, `route_telemetry.csv`, `deepscan_report.md`, `trick_probe.md` and `trick_report.md`.
 
 ---
 

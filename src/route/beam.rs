@@ -12,6 +12,7 @@
 use crate::console::{
     Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_LEFT, BUTTON_RIGHT,
 };
+use crate::route::sensors::{is_solid, scan_environment};
 
 #[derive(Clone, Copy, Debug)]
 enum Action {
@@ -26,6 +27,10 @@ enum Action {
     Wait(u32),
     Brake(u32),
     Moonwalk(u32),
+    /// Arranque con el truco de aceleración inversa (sección 18 del
+    /// catálogo): L+R 1f, A 1f, carrera, giro de 1f sin B y salto con B.
+    /// Solo se prueba en el nodo raíz.
+    AccelStart,
 }
 
 #[derive(Clone)]
@@ -64,10 +69,11 @@ impl Default for BeamConfig {
             stride: 6,
             goal_x: 3160,
             max_rollout: 60,
-            // Peso bajo: el beam debe priorizar avanzar; el desempate final
-            // entre rutas que llegan a la bandera ya lo hace `best_goal` por
-            // número de frames.
-            time_weight: 0.7,
+            // 2.5 = velocidad máxima (px/frame). El score equivale a
+            // "frame + (goal_x - x) / vx_max": es una estimación del tiempo
+            // total, no una preferencia por macro-acciones largas. Con 0.7 el
+            // beam premiaba saltos de 40 frames sobre correr 8.
+            time_weight: 2.5,
             verbose: true,
         }
     }
@@ -116,6 +122,11 @@ struct State {
     op: u8,
     timer: u8,
     sub: u8,
+    /// `$0756`: 0 = pequeño, 1 = grande, 2 = fuego. Cambia la altura del
+    /// hitbox usada por los sensores.
+    power: u8,
+    /// `$070F`: distinto de 0 cuando el flagpole registró la colisión.
+    flagpole_y: u8,
 }
 
 fn read_state(con: &Console) -> State {
@@ -132,7 +143,40 @@ fn read_state(con: &Console) -> State {
         op: r[0x0770],
         timer: r[0x07F8],
         sub: r[0x000E],
+        power: r[0x0756],
+        flagpole_y: r[0x070F],
     }
+}
+
+/// ¿Debe cortarse un `Run` en este frame? Se para en el punto de despegue
+/// seguro para el obstáculo más cercano. Sin esto, el beam solo puede saltar
+/// en múltiplos del stride y pierde velocidad contra tuberías/escaleras.
+fn run_should_stop(ram: &[u8; 2048], x: i32, y: i32, power: u8) -> bool {
+    let feet = y + if power == 0 { 32 } else { 48 };
+    let scan = scan_environment(ram, x, feet);
+
+    // Pozo: despegar con margen.
+    if scan.pit_dist <= 40 {
+        return true;
+    }
+
+    // Muro/tubería: el margen crece con la altura. Para 4 tiles (64 px)
+    // el despegue seguro está a ~88 px; para un escalón de 1 tile, a ~40 px.
+    if scan.wall_dist <= 999 {
+        let safe = (scan.wall_height + 24).clamp(24, 96);
+        if scan.wall_dist <= safe {
+            return true;
+        }
+    }
+
+    // Borde con caída grande (valle de la pirámide de 1-1): si a 20 px ya no
+    // hay suelo al nivel de los pies y tampoco 56 px más abajo, es un salto
+    // de 4 tiles, no una escalera.
+    if !is_solid(ram, x + 20, feet) && !is_solid(ram, x + 20, feet + 56) {
+        return true;
+    }
+
+    false
 }
 
 fn bcd_to_dec(b: u8) -> i32 {
@@ -232,6 +276,22 @@ fn build_sequence(action: Action, prev_a: bool, cfg: &BeamConfig) -> Vec<u8> {
                 seq.push(BUTTON_RIGHT | BUTTON_B);
             }
         }
+        Action::AccelStart => {
+            // Secuencia medida en `--mode probe`: el giro en el frame 24 es
+            // el que mejor X deja a los 90 frames.
+            seq.push(BUTTON_LEFT | BUTTON_RIGHT);
+            seq.push(BUTTON_A);
+            for _ in 0..22 {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+            seq.push(BUTTON_LEFT);
+            seq.push(BUTTON_RIGHT | BUTTON_B | BUTTON_A);
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
     }
     seq
 }
@@ -261,6 +321,8 @@ fn rollout(
         Action::Jump(_) | Action::JumpUp(_) => 4,
         _ => u32::MAX,
     };
+    // Los `Run` se cortan en el despegue seguro del siguiente obstáculo.
+    let event_stop = matches!(action, Action::Run(_));
 
     for b in seq {
         con.set_buttons(0, b);
@@ -300,7 +362,7 @@ fn rollout(
             child.dead = true;
             break;
         }
-        if s.x >= cfg.goal_x || s.state == 3 || s.sub == 4 || s.sub == 5 {
+        if s.state == 3 || s.sub == 4 || s.sub == 5 || s.flagpole_y != 0 {
             child.reached_goal = true;
             break;
         }
@@ -316,6 +378,14 @@ fn rollout(
             break;
         }
 
+        if event_stop
+            && frames_done > 1
+            && s.on_ground
+            && run_should_stop(&con.bus.ram, s.x, s.y, s.power)
+        {
+            break;
+        }
+
         if frames_done > jump_grace && s.on_ground {
             break; // aterrizaje: decisión siguiente
         }
@@ -325,6 +395,15 @@ fn rollout(
     child.score = child.x as f64 - cfg.time_weight * child.frame as f64
         + 0.4 * child.vx as f64
         + if child.on_ground { 2.0 } else { 0.0 };
+    // Cerca del mástil, premia ligeramente el subpíxel que activa la
+    // colisión estrecha (nybble bajo 6..9). Sin esto el beam puede quedarse
+    // con una variante que pasa de largo sin tocar la bandera.
+    if child.x > cfg.goal_x - 64
+        && child.x < cfg.goal_x + 32
+        && (6..=9).contains(&(child.x & 0x0F))
+    {
+        child.score += 8.0;
+    }
     child
 }
 
@@ -372,7 +451,7 @@ pub fn beam_search(
 
         let mut children = Vec::new();
         for node in &beam {
-            let actions = if node.on_ground {
+            let mut actions = if node.on_ground {
                 vec![
                     Action::Jump(26),
                     Action::Jump(20),
@@ -394,6 +473,9 @@ pub fn beam_search(
                     Action::Brake(cfg.stride),
                 ]
             };
+            if node.frame == 0 {
+                actions.push(Action::AccelStart);
+            }
             for action in actions {
                 let child = rollout(con, node, action, cfg, start_lives);
                 rollouts += 1;
@@ -436,14 +518,27 @@ pub fn beam_search(
                 .last()
                 .map(|b| b & BUTTON_A != 0)
                 .unwrap_or(false);
-            let key = (
-                child.x / 8,
-                child.y / 8,
-                child.vx / 4,
-                child.state,
-                child.on_ground,
-                last_a,
-            );
+            // Cerca del objetivo no se puede deduplicar por bloques de 8 px:
+            // la colisión del flagpole depende del nybble bajo de X.
+            let key = if child.x > cfg.goal_x - 160 {
+                (
+                    child.x,
+                    child.y / 4,
+                    child.vx,
+                    child.state as i32,
+                    child.on_ground as i32,
+                    last_a as i32,
+                )
+            } else {
+                (
+                    child.x / 4,
+                    child.y / 8,
+                    child.vx / 2,
+                    child.state as i32,
+                    child.on_ground as i32,
+                    last_a as i32,
+                )
+            };
             if seen.insert(key) {
                 next.push(child);
                 if next.len() >= cfg.beam_width {

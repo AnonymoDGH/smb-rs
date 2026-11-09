@@ -584,14 +584,15 @@
 <circle cx="504" cy="18" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="594" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="600" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
+<circle cx="696" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="702" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="756" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="762" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
-<circle cx="786" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
+<circle cx="780" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="1056" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="1062" cy="66" r="2.2" fill="#eb5757" opacity="0.9"/>
 <circle cx="1236" cy="54" r="2.2" fill="#eb5757" opacity="0.9"/>
 <line x1="1197" y1="12" x2="1197" y2="90" stroke="#f2c94c" stroke-width="2"/>
 <circle cx="24" cy="75" r="3" fill="#56ccf2"/>
-<text x="12" y="115" fill="#e8e8e8" font-family="monospace" font-size="9">SMB1 1-1 · deepscan · 206 cols · 15 enemies</text>
+<text x="12" y="115" fill="#e8e8e8" font-family="monospace" font-size="9">SMB1 1-1 · deepscan · 206 cols · 16 enemies</text>
 </svg>

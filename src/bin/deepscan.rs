@@ -15,16 +15,17 @@
 //!            [--max-rollout N] [--time-weight F] [--quiet]
 
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 
-use smb_rs::console::{
-    Console, ConsoleSnapshot, BUTTON_A, BUTTON_B, BUTTON_LEFT, BUTTON_RIGHT,
-};
+use smb_rs::console::{Console, BUTTON_A, BUTTON_B, BUTTON_LEFT, BUTTON_RIGHT};
 use smb_rs::route::hash::sha256_hex;
 use smb_rs::route::{
     beam_search, boot_to_level, inputs_to_script, plan_route, plan_to_json, BeamConfig,
     BeamResult, LevelMap, ManeuverKind, Pilot, RoutePlan,
+};
+use smb_rs::route::tricks::{
+    analyze_tricks, probe_low_gravity, probe_start, read_trick_state, ProbeResult, TrickReport,
 };
 use smb_rs::Cartridge;
 
@@ -39,6 +40,7 @@ struct Args {
     max_rollout: u32,
     time_weight: f64,
     quiet: bool,
+    script: Option<PathBuf>,
 }
 
 impl Default for Args {
@@ -52,17 +54,18 @@ impl Default for Args {
             stride: 6,
             goal_x: 3160,
             max_rollout: 60,
-            time_weight: 0.7,
+            time_weight: 2.5,
             quiet: false,
+            script: None,
         }
     }
 }
 
 fn usage() {
     eprintln!(
-        "Uso: deepscan <rom> <outdir> [--mode map|plan|global|all|selftest]\n\
+        "Uso: deepscan <rom> <outdir> [--mode map|plan|global|probe|all|selftest]\n\
          \x20     [--frames N] [--beam N] [--stride N] [--goal-x N]\n\
-         \x20     [--max-rollout N] [--time-weight F] [--quiet]\n\n\
+         \x20     [--max-rollout N] [--time-weight F] [--script FILE] [--quiet]\n\n\
          Ejemplos:\n\
          \x20 deepscan rom.nes out_deep --mode map\n\
          \x20 deepscan rom.nes out_deep --mode global --beam 24 --stride 6\n\
@@ -118,6 +121,10 @@ fn parse_args() -> Args {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(a.time_weight);
             }
+            "--script" => {
+                i += 1;
+                a.script = raw.get(i).map(PathBuf::from);
+            }
             "--quiet" => a.quiet = true,
             _ => {}
         }
@@ -143,6 +150,16 @@ fn main() {
             if !ok {
                 std::process::exit(1);
             }
+        }
+        "probe" => {
+            run_trick_probe(&rom, &args.outdir);
+        }
+        "replay" => {
+            let path = args
+                .script
+                .clone()
+                .unwrap_or_else(|| args.outdir.join("route_script.txt"));
+            replay_route(&rom, &sha, &args, &path);
         }
         "map" => {
             let (map, stats) = run_pilot_map(&rom, &sha, &args);
@@ -187,8 +204,15 @@ fn main() {
             write_global(&g, &args.outdir);
             write_report(&args, &sha, &g.map, &g.pilot, None, None, Some(&g));
             println!(
-                "global: {}f x={} bandera={} rollouts={} nodos={}",
-                g.result.frames, g.result.x, g.result.reached_goal, g.result.rollouts, g.result.nodes
+                "global: {}f x={} bandera={} rollouts={} nodos={} | vx_max={} f{} | flagpole={:?}",
+                g.result.frames,
+                g.result.x,
+                g.result.reached_goal,
+                g.result.rollouts,
+                g.result.nodes,
+                g.tricks.max_vx,
+                g.tricks.max_vx_frame,
+                g.tricks.flagpole_frame
             );
         }
         "all" => {
@@ -650,6 +674,7 @@ struct GlobalStats {
     pilot: PilotStats,
     result: BeamResult,
     cfg: BeamConfig,
+    tricks: TrickReport,
 }
 
 fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
@@ -686,6 +711,7 @@ fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
         unstucks: 0,
     };
     let mut csv = String::from("frame,buttons,x,y,vx,state,camera,op\n");
+    let mut trick_samples: Vec<(u32, u8, smb_rs::route::TrickState)> = Vec::new();
     for (f, &b) in result.inputs.iter().enumerate() {
         con2.set_buttons(0, b);
         if !con2.step_frame() {
@@ -701,6 +727,11 @@ fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
         let op = r[0x0770];
         if f >= result.boot_frames as usize {
             map.ingest(&con2.bus.ram, f as u64);
+            trick_samples.push((
+                (f as u32).saturating_sub(result.boot_frames),
+                b,
+                read_trick_state(&con2),
+            ));
         }
         csv.push_str(&format!("{f},{b},{x},{y},{vx},{st},{cam},{op}\n"));
         pilot.x = x;
@@ -713,11 +744,14 @@ fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
     std::fs::write(args.outdir.join("route_telemetry.csv"), csv)
         .expect("error route_telemetry.csv");
 
+    let tricks = analyze_tricks(&trick_samples);
+
     GlobalStats {
         map,
         pilot,
         result,
         cfg,
+        tricks,
     }
 }
 
@@ -775,6 +809,8 @@ fn write_global(g: &GlobalStats, outdir: &Path) {
     json.push_str("    \"map_svg\": \"level_map.svg\"\n");
     json.push_str("  }\n}\n");
     std::fs::write(outdir.join("route.json"), json).expect("error route.json");
+    std::fs::write(outdir.join("trick_report.md"), g.tricks.to_markdown())
+        .expect("error trick_report.md");
 }
 
 // --------------------------------------------------------------------------- //
@@ -832,6 +868,25 @@ fn write_report(
         md.push_str(&format!(
             "- Saltos: {}\n- Desatascos: {}\n",
             pilot.jumps, pilot.unstucks
+        ));
+    }
+    if let Some(g) = global {
+        md.push_str("\n## Trucos detectados\n\n");
+        md.push_str(&format!(
+            "- Velocidad máxima: {} (frame {})\n- Frames a velocidad tope: {}\n- Fricción inversa: {} frames\n- Moonwalk (L+R): {} frames\n- Aire: {} frames\n- Saltos: {}\n- Primer salto: frame {:?}, airtime {:?}\n- Flagpole: frame {:?}, Y={}, score={}, ventana={}\n",
+            g.tricks.max_vx,
+            g.tricks.max_vx_frame,
+            g.tricks.top_speed_frames,
+            g.tricks.reverse_friction_frames,
+            g.tricks.moonwalk_frames,
+            g.tricks.airborne_frames,
+            g.tricks.jumps,
+            g.tricks.first_jump_frame,
+            g.tricks.first_jump_airtime,
+            g.tricks.flagpole_frame,
+            g.tricks.flagpole_y,
+            g.tricks.flagpole_score,
+            if g.tricks.flagpole_window { "sí" } else { "no" }
         ));
     }
     md.push('\n');
@@ -900,6 +955,238 @@ fn write_report(
 }
 
 // --------------------------------------------------------------------------- //
+// Replay de una ruta guardada (route_script.txt)
+// --------------------------------------------------------------------------- //
+
+fn parse_route_script(path: &Path) -> Vec<u8> {
+    let text = std::fs::read_to_string(path).expect("no se pudo leer el script");
+    let mut events = Vec::new();
+    for ev in text.trim().split(',') {
+        let mut it = ev.split(':');
+        let Some(f) = it.next().and_then(|s| s.trim().parse::<usize>().ok()) else {
+            continue;
+        };
+        let Some(name) = it.next() else { continue };
+        let Some(val) = it.next().and_then(|s| s.trim().parse::<u8>().ok()) else {
+            continue;
+        };
+        let mask = match name {
+            "a" => BUTTON_A,
+            "b" => BUTTON_B,
+            "select" => smb_rs::console::BUTTON_SELECT,
+            "start" => smb_rs::console::BUTTON_START,
+            "up" => smb_rs::console::BUTTON_UP,
+            "down" => smb_rs::console::BUTTON_DOWN,
+            "left" => BUTTON_LEFT,
+            "right" => BUTTON_RIGHT,
+            _ => continue,
+        };
+        events.push((f, mask, val != 0));
+    }
+    let max = events.iter().map(|e| e.0).max().unwrap_or(0);
+    // Los eventos son cambios de estado: hay que propagar el valor entre frames.
+    let mut inputs = vec![0u8; max + 1];
+    let mut cur = 0u8;
+    let mut idx = 0;
+    for f in 0..=max {
+        while idx < events.len() && events[idx].0 == f {
+            let (_, mask, down) = events[idx];
+            if down {
+                cur |= mask;
+            } else {
+                cur &= !mask;
+            }
+            idx += 1;
+        }
+        inputs[f] = cur;
+    }
+    // El script solo guarda cambios: hay que alargar la cola con los últimos
+    // botones para llegar al mástil (los eventos acaban en el último cambio).
+    inputs.extend(std::iter::repeat(cur).take(120));
+    inputs
+}
+
+fn replay_route(rom: &[u8], sha: &str, args: &Args, script: &Path) {
+    let inputs = parse_route_script(script);
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut boot_con = Console::new(cart);
+    let Some((_, boot)) = boot_to_level(&mut boot_con, 2400) else {
+        eprintln!("replay: no se pudo detectar el inicio del nivel");
+        return;
+    };
+    let boot_frames = boot.len() as u32;
+
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let mut map = LevelMap::new(sha);
+    let mut csv = String::from("frame,buttons,x,y,vx,state,camera,op\n");
+    let mut trick_samples: Vec<(u32, u8, smb_rs::route::TrickState)> = Vec::new();
+    let mut final_x = 0;
+    let mut final_frame = 0u32;
+    let mut reached = false;
+    let mut died = false;
+
+    for (f, &b) in inputs.iter().enumerate() {
+        con.set_buttons(0, b);
+        if !con.step_frame() {
+            died = true;
+            break;
+        }
+        con.bus.apu.samples.clear();
+        let r = &con.bus.ram;
+        let x = (r[0x006D] as i32) * 256 + (r[0x0086] as i32);
+        let y = r[0x00CE] as i32;
+        let vx = (r[0x0057] as i8) as i32;
+        let st = r[0x001D];
+        let cam = (r[0x071A] as i32) * 256 + (r[0x071C] as i32);
+        let op = r[0x0770];
+        csv.push_str(&format!("{f},{b},{x},{y},{vx},{st},{cam},{op}\n"));
+        if f as u32 >= boot_frames {
+            map.ingest(&con.bus.ram, f as u64);
+            trick_samples.push((
+                (f as u32).saturating_sub(boot_frames),
+                b,
+                read_trick_state(&con),
+            ));
+        }
+        final_x = x;
+        final_frame = f as u32;
+        if r[0x000B] == 1 {
+            died = true;
+            break;
+        }
+        if st == 3 || r[0x000E] == 4 || r[0x000E] == 5 || r[0x070F] != 0 {
+            reached = true;
+            break;
+        }
+    }
+
+    let level_frames = if reached {
+        final_frame.saturating_sub(boot_frames) + 1
+    } else {
+        final_frame.saturating_sub(boot_frames)
+    };
+    let tricks = analyze_tricks(&trick_samples);
+
+    std::fs::write(args.outdir.join("route_replay.csv"), csv)
+        .expect("error route_replay.csv");
+    std::fs::write(args.outdir.join("trick_report.md"), tricks.to_markdown())
+        .expect("error trick_report.md");
+    std::fs::write(args.outdir.join("level_map.json"), map.to_json())
+        .expect("error level_map.json");
+    std::fs::write(args.outdir.join("level_map.svg"), map.to_svg(None))
+        .expect("error level_map.svg");
+    std::fs::write(args.outdir.join("level_map.txt"), map.to_ascii())
+        .expect("error level_map.txt");
+
+    println!(
+        "replay: {}f nivel (total {}f, boot {}f) x={} bandera={} muerto={} | vx_max={} f{} | flagpole={:?} Y={} ventana={}",
+        level_frames,
+        final_frame + 1,
+        boot_frames,
+        final_x,
+        reached,
+        died,
+        tricks.max_vx,
+        tricks.max_vx_frame,
+        tricks.flagpole_frame,
+        tricks.flagpole_y,
+        tricks.flagpole_window
+    );
+}
+
+// --------------------------------------------------------------------------- //
+// Probe empírico de trucos
+// --------------------------------------------------------------------------- //
+
+fn probe_row(r: &ProbeResult) -> String {
+    format!(
+        "| `{}` | {} | {} | {} | {} | {} | {:?} | {} |",
+        r.name,
+        r.frames,
+        r.x,
+        r.vx,
+        r.max_vx,
+        r.peak_height,
+        r.landed,
+        if r.final_state.flagpole_window() { "sí" } else { "no" }
+    )
+}
+
+fn run_trick_probe(rom: &[u8], outdir: &Path) {
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let Some((snap, boot)) = boot_to_level(&mut con, 2400) else {
+        eprintln!("probe: no se pudo bootear el nivel");
+        return;
+    };
+    let start = smb_rs::route::read_trick_state(&con);
+
+    println!(
+        "probe: inicio de nivel x={} y={} vx={} facing={} moving={} frame_rule={}",
+        start.x, start.y, start.vx, start.facing, start.moving, start.frame_rule
+    );
+
+    let results = probe_start(&mut con, &snap);
+    let mut md = String::from("# deepscan probe — trucos de arranque (1-1)\n\n");
+    md.push_str(&format!(
+        "Snapshot de inicio: x={} y={} vx={} (boot {} frames).\n\n",
+        start.x, start.y, start.vx, boot.len()
+    ));
+    md.push_str(
+        "Cada prueba ejecuta un prefijo exacto y luego mantiene `RIGHT+B` hasta el frame 90. \
+         `altura` es la altura máxima sobre la Y inicial; `aterrizaje` es el frame del primer \
+         contacto con el suelo tras el salto.\n\n",
+    );
+    md.push_str("| prueba | frames | x | vx | max_vx | altura | aterrizaje | flag |\n");
+    md.push_str("|---|---:|---:|---:|---:|---:|---:|---|\n");
+    for r in &results {
+        md.push_str(&probe_row(r));
+        md.push('\n');
+    }
+
+    md.push_str("\n## Low-gravity: primer salto vs salto tras correr\n\n");
+    md.push_str("| prueba | frames | x | vx | max_vx | altura | aterrizaje |\n");
+    md.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    for hold_a in [4u32, 8, 14, 26] {
+        let (first, later) = probe_low_gravity(&mut con, &snap, hold_a, 20);
+        for r in [&first, &later] {
+            md.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} | {} | {:?} |\n",
+                r.name, r.frames, r.x, r.vx, r.max_vx, r.peak_height, r.landed
+            ));
+        }
+    }
+
+    std::fs::write(outdir.join("trick_probe.md"), md).expect("error trick_probe.md");
+
+    println!("\nTop 12 por X a los 90 frames:");
+    for r in results.iter().take(12) {
+        println!(
+            "  {:<28} x={:4} vx={:2} max_vx={:2} altura={:2} aterrizaje={:?}",
+            r.name, r.x, r.vx, r.max_vx, r.peak_height, r.landed
+        );
+    }
+    let best = &results[0];
+    println!(
+        "\nMejor arranque: {} x={} (baseline {}), ganancia {} px",
+        best.name,
+        best.x,
+        results
+            .iter()
+            .find(|r| r.name == "baseline_run")
+            .map(|r| r.x)
+            .unwrap_or(0),
+        best.x
+            - results
+                .iter()
+                .find(|r| r.name == "baseline_run")
+                .map(|r| r.x)
+                .unwrap_or(0)
+    );
+}
+
+// --------------------------------------------------------------------------- //
 // Selftest de determinismo del snapshot
 // --------------------------------------------------------------------------- //
 
@@ -940,7 +1227,7 @@ fn selftest(rom: &[u8], outdir: &Path) -> bool {
 
     // Test 1: mismo snapshot, misma secuencia -> mismo estado.
     let mut hashes = Vec::new();
-    for phase in 0..2 {
+    for _ in 0..2 {
         con.restore(&snap);
         for f in 0..120u32 {
             let b = if f % 8 < 4 {

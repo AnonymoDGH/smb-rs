@@ -147,11 +147,14 @@ Cartografía 1-1 desde la Block Buffer (`$0500`), planifica saltos con la físic
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode map --frames 4000
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
 
-# Búsqueda global (beam search sobre snapshots)
-.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8
+# Búsqueda global (beam search sobre snapshots) — 1-1 en 1271 frames (21.15 s)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8 --max-rollout 40 --time-weight 2.5
+
+# Pruebas empíricas de trucos (aceleración inversa, low-gravity, fricción inversa)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode probe
 ```
 
-Salidas: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (reproducible con `nesdump --script`), `route_trace.csv`, `route_telemetry.csv` y `deepscan_report.md`.
+Salidas: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (reproducible con `nesdump --script`), `route_trace.csv`, `route_telemetry.csv`, `deepscan_report.md`, `trick_probe.md` y `trick_report.md`.
 
 ---
 

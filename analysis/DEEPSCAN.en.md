@@ -14,8 +14,9 @@
 | 2. Map | `route::map` | Merges the visible 16-column × 13-row window into an absolute map. Records enemies (per-slot spawn) and the flag column. |
 | 3. Physics | `route::physics` | Jump/gravity model using the ROM constants (`JumpMForceData`, `FallMForceData`, `PlayerYSpdData`). |
 | 4. Plan | `route::planner` | Splits the map into obstacles and picks takeoff/hold for each one. |
-| 5. Search | `route::beam` | Beam search over real emulator snapshots. |
-| 6. Replay | `deepscan` | Re-runs the route from power-on to verify determinism and generate telemetry. |
+| 5. Tricks | `route::tricks` | Empirical bug/trick probes and a trick detector over a route. |
+| 6. Search | `route::beam` | Beam search over real emulator snapshots. |
+| 7. Replay | `deepscan` | Re-runs the route from power-on to verify determinism and generate telemetry. |
 
 The key piece is the **deterministic snapshot** (`ConsoleSnapshot`): CPU + RAM + PPU + APU, without the framebuffer or audio buffer. Restoring a snapshot and repeating a button sequence produces exactly the same state (`--mode selftest` checks it).
 
@@ -36,9 +37,15 @@ cargo build --release
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
 
 # 4. Global search with real rollouts
-.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8 --max-rollout 40
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8 --max-rollout 40 --time-weight 2.5
 
-# 5. Everything + report
+# 5. Empirical trick probes (startup, low gravity, reverse friction)
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode probe
+
+# 6. Deterministic replay of a saved route_script.txt
+.\target\release\deepscan.exe "ROM.nes" out_deep --mode replay --script out_deep\route_script.txt
+
+# 7. Everything + report
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode all --beam 12 --frames 2000
 ```
 
@@ -46,13 +53,14 @@ cargo build --release
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--mode` | `all` | `selftest`, `map`, `plan`, `global`, `all` |
+| `--mode` | `all` | `selftest`, `map`, `plan`, `global`, `probe`, `replay`, `all` |
 | `--frames` | 4000 | Level frame budget |
 | `--beam` | 16 | Beam width (nodes kept per step) |
 | `--stride` | 6 | Frames per run/wait/brake macro-action |
 | `--goal-x` | 3160 | Flag X |
 | `--max-rollout` | 60 | Maximum frames per rollout |
-| `--time-weight` | 0.7 | Time weight in the score |
+| `--time-weight` | 2.5 | Time weight in the score (= max speed, see below) |
+| `--script` | — | Route script for `--mode replay` |
 | `--quiet` | — | No progress traces on stderr |
 
 ---
@@ -74,6 +82,8 @@ cargo build --release
 | `route_telemetry.csv` | Deterministic replay of the found route. |
 | `deepscan_report.md` | Human-readable report with every stage. |
 | `selftest.txt` | Determinism test results. |
+| `trick_probe.md` | Startup / low-gravity probe table (`--mode probe`). |
+| `trick_report.md` | Trick detector over the route: max speed, reverse friction, moonwalk, flagpole. |
 
 ---
 
@@ -85,8 +95,11 @@ On the ground:
 - `JumpUp(hold)` ∈ {20, 26}: vertical jump and advance at the end; used for a step directly above.
 - `BackJump(back, hold)` with `back` ∈ {14, 28}: back up, build speed and jump; used against a wall Mario is touching.
 - `Run(stride)`, `Wait(stride)`, `Brake(stride)`, `Moonwalk(stride)`.
+- `AccelStart` (root node only): `L+R` 1f, `A` 1f, 22f run, 1f turn without B, jump; the reverse-acceleration trick measured by `--mode probe`.
 
 In the air: `Run`, `Wait`, `Brake`.
+
+`Run` stops at the **safe takeoff point** for the next obstacle (Block Buffer sensors: wall/pipe, pit, big-drop edge). Without this the beam can only jump on stride multiples and loses speed against pipes.
 
 Node score:
 
@@ -94,7 +107,7 @@ Node score:
 x - time_weight * frame + 0.4 * vx + 2.0 * on_ground
 ```
 
-A low `time_weight` (0.7) makes the beam prioritize advancing; the final tie-break among flag-reaching routes is done by `best_goal` using frame count. Deduplication uses `(x/8, y/8, vx/4, state, on_ground, last_a)` to avoid keeping near-identical nodes.
+With `time_weight=2.5` (= max speed) the score is a **total-time estimate**: `frame + (goal_x - x) / vx_max`. The final tie-break among flag-reaching routes is `best_goal` by frame count. Deduplication uses position/velocity blocks, except near the flagpole where the exact X is kept because the pole collision depends on the low nybble of X (window 6..9). The goal also fires when the pole collision is registered (`$070F`, `$010F`, `Player_State=3`), not only when `goal_x` is crossed.
 
 ---
 
@@ -107,6 +120,7 @@ A low `time_weight` (0.7) makes the beam prioritize advancing; the final tie-bre
 5. **Multi-objective score** — keep a Pareto front `(frames, x)` instead of a single scalar.
 6. **Plan-guided pruning** — use `plan_route` as a prior to limit beam actions to jump zones.
 7. **Save/resume** — serialize `ConsoleSnapshot` to disk to continue a long search.
+8. **Advanced tricks** — `AccelStart`, moonwalk, walljump and FPG/FFPG already have primitives or detectors in `route::tricks`; walljump still needs its own action and the FPG should be measured as a full-level category (to the castle), not as a pole touch.
 
 ---
 
@@ -124,19 +138,20 @@ A low `time_weight` (0.7) makes the beam prioritize advancing; the final tie-bre
 
 ROM SHA-256: `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de`.
 
-| Method | Level frames | Final X | Flag |
-|---|---|---|---|
-| Baseline pilot (`--mode map`) | 1511 | 3161 | yes |
-| Heuristic plan (`--mode plan`) | 2134 | 3161 | yes |
-| Beam (`--beam 8`, `--stride 8`, `--frames 1800`) | **1426** | **3161** | **yes** |
+| Method | Level frames | Time (60.0988 fps) | Final X | Flag |
+|---|---|---|---|---|
+| Baseline pilot (`--mode map`) | 1511 | 25.15 s | 3161 | yes |
+| Heuristic plan (`--mode plan`) | 2134 | 35.51 s | 3161 | yes |
+| Beam (`--time-weight 0.7`) | 1426 | 23.73 s | 3161 | yes |
+| Beam (`--time-weight 2.5`) | **1266** | **21.07 s** | **3161** | **yes** |
 
-The beam finds a route **85 frames (~1.4 s) faster than the baseline pilot** without using its sensors: only real rollouts over snapshots. The heuristic plan is slower because it executes maneuvers with retries and does not optimize global time.
+**1-1 record (21.43 s ≈ 1288 frames): beaten by 22 frames (0.37 s).** The time ends on the pole-touch frame — what the record measures — so the flagpole glitch (FPG/FFPG), which only skips the later animation, does not improve this mark. See section 32 of [`BUGS_Y_TRUCOS.md`](BUGS_Y_TRUCOS.md) for the trick analysis (reverse acceleration +11 px, low gravity with no advantage, walljump and moonwalk unused in 1-1).
 
-Exact result configuration:
+Exact configuration for the fastest result:
 
 ```text
-beam=8  stride=8  max_rollout=40  time_weight=0.7  frames=1800
-rollouts=2868  nodes=477  boot=240f  level=1426f  total=1666f
+beam=8  stride=8  max_rollout=40  time_weight=2.5  frames=1800
+rollouts=9154  nodes=880  boot=240f  level=1266f  total=1506f
 ```
 
 Artifacts from that run are in [`analysis/deepscan/`](deepscan/).
