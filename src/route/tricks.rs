@@ -355,6 +355,133 @@ pub fn probe_low_gravity(
     )
 }
 
+/// Buscador de entrada a pared en la escalera (x≈2144): desde suelo en
+/// x=2006 prueba andar/correr + salto mínimo + tirón LEFT. Detecta
+/// teletransporte (>6 px en 1 frame) o Mario dentro del bloque.
+pub fn probe_wall_entry(
+    con: &mut Console,
+    start: &ConsoleSnapshot,
+    start_x: i32,
+) -> Vec<String> {
+    let mut hits = Vec::new();
+    let combos: Vec<u8> = vec![
+        BUTTON_RIGHT,
+        BUTTON_RIGHT | BUTTON_B,
+        BUTTON_RIGHT | BUTTON_B | BUTTON_A,
+    ];
+    for walk in [true, false] {
+        for run_len in (0..100u32).step_by(5) {
+            for hold in 0..=5u32 {
+                for steer_len in 1..=4u32 {
+                    con.restore(start);
+                    let approach = if walk { BUTTON_RIGHT } else { BUTTON_RIGHT | BUTTON_B };
+                    let mut seq = vec![approach; run_len as usize];
+                    if hold > 0 {
+                        seq.extend(vec![approach | BUTTON_A; hold as usize]);
+                    }
+                    seq.extend(vec![BUTTON_LEFT; steer_len as usize]);
+                    seq.extend(vec![BUTTON_RIGHT | BUTTON_B; 60]);
+                    let mut prev_x = start_x;
+                    let mut max_x = start_x;
+                    let mut tele = None;
+                    let mut inside = None;
+                    for (i, &btn) in seq.iter().enumerate() {
+                        con.set_buttons(0, btn);
+                        con.step_frame();
+                        con.bus.apu.samples.clear();
+                        let r = &con.bus.ram;
+                        let x = (r[0x6D] as i32) * 256 + r[0x86] as i32;
+                        let y = r[0xCE] as i32;
+                        let st = r[0x001D];
+                        if x > max_x {
+                            max_x = x;
+                        }
+                        if (x - prev_x).abs() > 6 {
+                            tele = Some((i, x - prev_x, x));
+                        }
+                        // Escalera col 134..137: x 2144..2192, fila 10 (y pies 192..208)
+                        if x >= 2144 && x < 2192 && y + 32 > 176 && y + 32 < 224 && st == 0 {
+                            inside = Some((i, x, y));
+                        }
+                        prev_x = x;
+                        if r[0x000B] == 1 {
+                            break;
+                        }
+                    }
+                    let _ = combos;
+                    if tele.is_some() || inside.is_some() {
+                        hits.push(format!(
+                            "walk={walk} run={run_len} hold={hold} steer={steer_len} max_x={max_x} tele={tele:?} inside={inside:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    hits
+}
+
+/// Buscador de FPG cayendo dentro del asta: desde la cúspide de la escalera
+/// (snapshot en el aire) varía subpíxel (pulsos LEFT 0..15), run 0..30,
+/// hold 20..26 y seguimiento. Busca slide 0 (bandera no baja).
+pub fn probe_fpg_drop(
+    con: &mut Console,
+    start: &ConsoleSnapshot,
+) -> (usize, usize, u32) {
+    let rb = BUTTON_RIGHT | BUTTON_B;
+    let mut tried = 0usize;
+    let mut found = 0usize;
+    let mut best_slide = u32::MAX;
+    for sub_taps in 0..16u32 {
+        for run in (0..30u32).step_by(4) {
+            for hold in 20..=26u32 {
+                for steer in 0..3u32 {
+                    tried += 1;
+                    con.restore(start);
+                    let mut seq = vec![BUTTON_LEFT; sub_taps as usize];
+                    seq.extend(vec![rb; run as usize]);
+                    seq.extend(vec![rb | BUTTON_A; hold as usize]);
+                    match steer {
+                        0 => seq.extend(vec![rb; 80]),
+                        1 => {
+                            seq.push(BUTTON_LEFT);
+                            seq.extend(vec![rb; 80]);
+                        }
+                        _ => {
+                            seq.extend(vec![BUTTON_RIGHT; 4]);
+                            seq.extend(vec![rb; 80]);
+                        }
+                    }
+                    let mut pole = false;
+                    let mut sub4 = 0u32;
+                    let mut prev_sub = 0u8;
+                    for &btn in &seq {
+                        con.set_buttons(0, btn);
+                        con.step_frame();
+                        con.bus.apu.samples.clear();
+                        let r = &con.bus.ram;
+                        if r[0x001D] == 3 || r[0x070F] != 0 {
+                            pole = true;
+                        }
+                        if r[0x000E] == 4 {
+                            sub4 += 1;
+                        }
+                        prev_sub = r[0x000E];
+                        let _ = prev_sub;
+                    }
+                    if pole {
+                        best_slide = best_slide.min(sub4);
+                        if sub4 == 0 {
+                            found += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (tried, found, best_slide)
+}
+
 /// Resumen legible de una prueba (para `--mode probe` y reportes).
 pub fn probe_line(r: &ProbeResult) -> String {
     format!(

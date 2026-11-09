@@ -154,6 +154,12 @@ fn main() {
         "probe" => {
             run_trick_probe(&rom, &args.outdir);
         }
+        "wall" => {
+            run_wall_probe(&rom, &args.outdir);
+        }
+        "fpg" => {
+            run_fpg_probe(&rom, &args.outdir);
+        }
         "replay" => {
             let path = args
                 .script
@@ -1093,6 +1099,76 @@ fn replay_route(rom: &[u8], sha: &str, args: &Args, script: &Path) {
         tricks.flagpole_y,
         tricks.flagpole_window
     );
+}
+
+fn run_wall_probe(rom: &[u8], outdir: &Path) {
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let Some((snap0, _)) = boot_to_level(&mut con, 2400) else {
+        eprintln!("wall: sin boot");
+        return;
+    };
+    let inputs = parse_route_script(&outdir.join("route_script.txt"));
+    con.restore(&snap0);
+    let mut st = None;
+    for (f, &b) in inputs.iter().enumerate() {
+        if f >= 1045 {
+            break;
+        }
+        con.set_buttons(0, b);
+        con.step_frame();
+        con.bus.apu.samples.clear();
+    }
+    let r = &con.bus.ram;
+    let x0 = (r[0x6D] as i32) * 256 + r[0x86] as i32;
+    st = Some((con.snapshot(), x0));
+    let (snap, x0) = st.unwrap();
+    println!("wall: snapshot escalera x={x0}");
+    let hits = smb_rs::route::tricks::probe_wall_entry(&mut con, &snap, x0);
+    println!("wall: {} entradas/teleports en x≈2144", hits.len());
+    for h in &hits {
+        println!("  {h}");
+    }
+    let mut md = String::from("# wall entry probe (escalera x≈2144)\n\n");
+    md.push_str(&format!(
+        "Snapshot: x={x0}. Probadas andar/correr + salto 0..5 + tiron LEFT.\n\n## Resultados\n\n"
+    ));
+    if hits.is_empty() {
+        md.push_str("Sin entradas ni teletransportes (0 casos).\n");
+    }
+    for h in &hits {
+        md.push_str(&format!("- {h}\n"));
+    }
+    std::fs::write(outdir.join("wall_probe.md"), md).expect("wall_probe.md");
+}
+
+fn run_fpg_probe(rom: &[u8], outdir: &Path) {
+    let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");
+    let mut con = Console::new(cart);
+    let Some((snap0, _)) = boot_to_level(&mut con, 2400) else {
+        eprintln!("fpg: sin boot");
+        return;
+    };
+    let inputs = parse_route_script(&outdir.join("route_script.txt"));
+    con.restore(&snap0);
+    for (f, &b) in inputs.iter().enumerate() {
+        if f >= 1434 {
+            break;
+        }
+        con.set_buttons(0, b);
+        con.step_frame();
+        con.bus.apu.samples.clear();
+    }
+    let snap = con.snapshot();
+    println!("fpg: snapshot cumulo, probando subpixel+caida...");
+    let (tried, found, best) =
+        smb_rs::route::tricks::probe_fpg_drop(&mut con, &snap);
+    println!("fpg: probados={tried} FPG={found} mejor_slide={best}f");
+    let mut md = String::from("# FPG probe (caida dentro del asta)\n\n");
+    md.push_str(&format!(
+        "- Probados: {tried}\n- FPG (slide 0): {found}\n- Mejor slide visto: {best}f\n\n"
+    ));
+    std::fs::write(outdir.join("fpg_probe.md"), md).expect("fpg_probe.md");
 }
 
 // --------------------------------------------------------------------------- //
