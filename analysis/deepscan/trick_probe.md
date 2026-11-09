@@ -54,3 +54,38 @@ Cada prueba ejecuta un prefijo exacto y luego mantiene `RIGHT+B` hasta el frame 
 | `run20_jump_h14` | 120 | 248 | 40 | 40 | 54 | Some(61) |
 | `first_jump_h26` | 120 | 202 | 40 | 40 | 65 | Some(50) |
 | `run20_jump_h26` | 120 | 237 | 40 | 40 | 68 | Some(72) |
+
+## Exhaustivo: 2 frames + correr (hasta 60f)
+
+| prueba | frames | x | vx | max_vx | altura | aterrizaje | flag |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `pre_LRB_A` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LRB_RA` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LRB_RBA` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LR_A` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LR_RA` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LR_RBA` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `lr_ra_documented` | 60 | 142 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LRB_RB` | 60 | 134 | 40 | 40 | 0 | None | sí |
+| `pre_LR_RB` | 60 | 134 | 40 | 40 | 0 | None | sí |
+| `pre_L_RA` | 60 | 133 | 40 | 40 | 24 | Some(23) | no |
+| `pre_L_RBA` | 60 | 133 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LB_RA` | 60 | 133 | 40 | 40 | 24 | Some(23) | no |
+| `pre_LB_RBA` | 60 | 133 | 40 | 40 | 24 | Some(23) | no |
+| `pre_R_RB` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_RB_RB` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LRB_R` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LRB_LRB` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LRB_LR` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LR_R` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LR_LRB` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_LR_LR` | 60 | 132 | 40 | 40 | 0 | None | no |
+| `pre_0_LRB` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_0_LR` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_B_LRB` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_B_LR` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_R_R` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_RB_R` | 60 | 131 | 40 | 40 | 0 | None | no |
+| `pre_R_LRB` | 60 | 130 | 40 | 40 | 0 | None | no |
+| `pre_R_LR` | 60 | 130 | 40 | 40 | 0 | None | no |
+| `pre_L_A` | 60 | 130 | 40 | 40 | 24 | Some(23) | no |

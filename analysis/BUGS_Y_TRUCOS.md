@@ -716,7 +716,8 @@ El moonwalk sostenido no aparece en la ruta óptima. Solo se usa **1 frame de L+
 | Frames de nivel | **1266** |
 | Tiempo a 60.0988 fps | **21.07 s** |
 | Récord objetivo | 21.43 s (1288 frames) |
-| Margen | **22 frames (0.37 s)** |
+| Margen (primer movimiento → mástil) | **22 frames (0.37 s)** |
+| Tiempo desde "400" (SDA) → mástil | **1290f = 21.47 s (2f sobre 1288)** |
 | Beam / stride / max_rollout | 8 / 8 / 40 |
 | `time_weight` | 2.5 (= velocidad máxima) |
 | Rollouts / nodos | 9154 / 880 |
@@ -727,7 +728,11 @@ El moonwalk sostenido no aparece en la ruta óptima. Solo se usa **1 frame de L+
 | Moonwalk (L+R) | 1 frame (salida) |
 | Saltos / aire | 36 / 937 frames |
 
-El perfil de velocidad solo tiene un tramo lento: la aceleración inicial (frames 1-21, media 0.84 px/f). A partir del frame 33 la velocidad es 40 (2.5 px/f) hasta el mástil. La diferencia con el mínimo teórico (3121 px / 2.5 = 1248 frames) son ~18 frames, todos de la aceleración inicial. Para bajar de 1266 habría que romper la aceleración desde 0, no la física del resto del nivel.
+El perfil de velocidad solo tiene un tramo lento: la aceleración inicial. A partir del frame 33 del nivel la velocidad es 40 (2.5 px/f) **hasta el mástil sin caer ni una vez** (1232 frames seguidos; la única excepción es el frame del agarre). La diferencia con el mínimo teórico (3121 px / 2.5 = 1248 frames) son 18 frames, todos de la aceleración inicial. Para bajar de 1266 habría que acelerar desde 0 más rápido, no tocar el resto del nivel.
+
+**Definición de tiempo (verificada con la API de speedrun.com):** las categorías de juego completo usan el estándar SDA — inicio en el frame en que aparece el **"400"** (frame global 215 en nuestra ROM, ticks cada 24 frames) y fin en el hacha de 8-4. Medido así, nuestra ruta es 1290f (21.47 s). La definición *All-Stars* ("frame antes de que Mario se mueva a la derecha") contaría 1266f (21.07 s). El récord 21.43 s (1288f) no coincide con ninguna categoría de nivel individual en speedrun.com (solo hay Any%, Warpless, etc. de juego completo), así que no se puede verificar cuál definición usa. Un TIME de 360 en el mástil exigiría 960 frames para 3121 px (3.25 px/f de media, por encima del máximo físico 2.5 px/f): imposible corriendo; requeriría un teletransporte que no existe documentado en 1-1 (el salto de pared más grande posible es el ancho de pantalla, 256 px ≈ 102 frames).
+
+**FPG (flagpole glitch):** probado desde el aterrizaje previo al mástil (x=3138) con 550 combinaciones (pulsos de subpíxel, mini-saltos y seguimientos): **0 casos con slide 0**. Todos dan slide 47–62 frames y bandera 48→171 (baja normal). El FPG requiere caer *dentro* del asta desde arriba (hueco de 12 px entre ventanas de colisión, ver negative-seven), no entrar por el lado desde el suelo (ahí el bloque frena). Queda como línea futura si la categoría midiera hasta el castillo.
 
 ### 32.6 Reproducir
 

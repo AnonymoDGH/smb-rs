@@ -141,7 +141,7 @@ Maps 1-1 from the Block Buffer (`$0500`), plans jumps with the ROM physics and s
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode map --frames 4000
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode plan
 
-# Global search (beam search over snapshots) — 1-1 in 1271 frames (21.15 s)
+# Global search (beam search over snapshots) — 1-1 in 1266 frames (21.07 s)
 .\target\release\deepscan.exe "ROM.nes" out_deep --mode global --beam 8 --frames 1800 --stride 8 --max-rollout 40 --time-weight 2.5
 
 # Empirical trick probes (reverse acceleration, low gravity, reverse friction)
@@ -149,6 +149,17 @@ Maps 1-1 from the Block Buffer (`$0500`), plans jumps with the ROM physics and s
 ```
 
 Outputs: `level_map.json/svg/txt`, `route_plan.json/md/svg`, `route.json`, `route_script.txt` (replayable with `nesdump --script`), `route_trace.csv`, `route_telemetry.csv`, `deepscan_report.md`, `trick_probe.md` and `trick_report.md`.
+
+To **watch it as a video**, `playbot` can replay that exact route:
+
+```powershell
+.\target\release\playbot.exe "ROM.nes" out_deepscan_21s --script analysis\deepscan\route_script.txt --scale 2
+python tools\make_video.py out_deepscan_21s assets\videos\deepscan_1266f_21s.mp4
+```
+
+<video src="assets/videos/deepscan_1266f_21s.mp4" controls width="640"></video>
+
+**[▶ Open `assets/videos/deepscan_1266f_21s.mp4` (17.5 MB, 1725 frames, 60.0988 fps, 512×560)](assets/videos/deepscan_1266f_21s.mp4)**
 
 ---
 

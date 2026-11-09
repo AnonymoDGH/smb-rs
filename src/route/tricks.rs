@@ -42,6 +42,8 @@ pub struct TrickState {
     pub flagpole_score: u8,
     /// `$0756` PlayerStatus (0 = pequeño, 1 = grande, 2 = fuego).
     pub power: u8,
+    /// Calle de la bandera: Y del slot 5 de enemigos ($00CF+5).
+    pub flag_y: u8,
     pub lives: u8,
     pub timer: u8,
     pub op: u8,
@@ -98,6 +100,7 @@ pub fn read_trick_state(con: &Console) -> TrickState {
         flagpole_y: r[0x070F],
         flagpole_score: r[0x010F],
         power: r[0x0756],
+        flag_y: r[0x00CF + 5],
         lives: r[0x075A],
         timer: r[0x07F8],
         op: r[0x0770],
@@ -274,6 +277,51 @@ pub fn probe_start(con: &mut Console, start: &ConsoleSnapshot) -> Vec<ProbeResul
         .iter()
         .map(|s| run_probe(con, start, s))
         .collect();
+    out.sort_by(|a, b| b.x.cmp(&a.x).then(b.max_vx.cmp(&a.max_vx)));
+    out
+}
+
+/// Búsqueda exhaustiva de los 2 primeros frames: prueba todas las
+/// combinaciones relevantes (9 botones × 9) y luego corre hasta el frame 60.
+/// Encuentra el prefijo que llega más lejos / antes a velocidad máxima.
+pub fn probe_exhaustive_prefix(
+    con: &mut Console,
+    start: &ConsoleSnapshot,
+) -> Vec<ProbeResult> {
+    let frames = 60u32;
+    let combos: Vec<(String, u8)> = vec![
+        ("0".into(), 0),
+        ("A".into(), BUTTON_A),
+        ("B".into(), BUTTON_B),
+        ("R".into(), BUTTON_RIGHT),
+        ("L".into(), BUTTON_LEFT),
+        ("RA".into(), BUTTON_RIGHT | BUTTON_A),
+        ("RB".into(), BUTTON_RIGHT | BUTTON_B),
+        ("RBA".into(), BUTTON_RIGHT | BUTTON_B | BUTTON_A),
+        ("LRB".into(), LR | BUTTON_B),
+        ("LR".into(), LR),
+        ("LB".into(), BUTTON_LEFT | BUTTON_B),
+    ];
+    let mut out = Vec::new();
+    for (n1, b1) in &combos {
+        for (n2, b2) in &combos {
+            let spec = ProbeSpec::new(
+                format!("pre_{n1}_{n2}"),
+                vec![*b1, *b2],
+                BUTTON_RIGHT | BUTTON_B,
+                frames,
+            );
+            out.push(run_probe(con, start, &spec));
+        }
+    }
+    // El prefijo L+R, R+A documentado en la guía de movimiento.
+    let spec = ProbeSpec::new(
+        "lr_ra_documented",
+        vec![LR, BUTTON_RIGHT | BUTTON_A],
+        BUTTON_RIGHT | BUTTON_B,
+        frames,
+    );
+    out.push(run_probe(con, start, &spec));
     out.sort_by(|a, b| b.x.cmp(&a.x).then(b.max_vx.cmp(&a.max_vx)));
     out
 }

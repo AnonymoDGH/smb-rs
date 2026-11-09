@@ -1,5 +1,6 @@
 //! playbot <rom> <outdir> [--frames 3000] [--scale 2] [--trick showcase|speedrun|fpg|double-friction|minus]
 //!         [--fpg-x 3036] [--macro "x=140..145:SEQ(4:L+B,2:L+R+B,12:R+B+A);x=3036..3040:SEQ(18:R+B+A)"]
+//!         [--script analysis/deepscan/route_script.txt]   ; replay determinista de deepscan
 //!
 //! Motor TAS Heuristic + Inyector de Trucos Programable por RAM/Subpixel/FrameRule.
 //! Genera frame_*.png + telemetry.csv (100% compatible con make_video.py)
@@ -253,6 +254,55 @@ fn parse_macro_rules(dsl: &str) -> Vec<TriggerRule> {
     rules
 }
 
+/// Reconstruye botones frame a frame desde `route_script.txt`
+/// (`frame:boton:valor`, cambios de estado). Propaga el estado entre frames
+/// y alarga la cola con los últimos botones (el script acaba en el último
+/// cambio, antes de tocar el mástil).
+fn parse_route_script(path: &str) -> Vec<u8> {
+    let text = std::fs::read_to_string(path).expect("no se pudo leer el script");
+    let mut events: Vec<(usize, u8, bool)> = Vec::new();
+    for ev in text.trim().split(',') {
+        let mut it = ev.split(':');
+        let Some(f) = it.next().and_then(|s| s.trim().parse::<usize>().ok()) else {
+            continue;
+        };
+        let Some(name) = it.next() else { continue };
+        let Some(val) = it.next().and_then(|s| s.trim().parse::<u8>().ok()) else {
+            continue;
+        };
+        let mask = match name.trim() {
+            "a" => BUTTON_A,
+            "b" => BUTTON_B,
+            "select" => BUTTON_SELECT,
+            "start" => BUTTON_START,
+            "up" => BUTTON_UP,
+            "down" => BUTTON_DOWN,
+            "left" => BUTTON_LEFT,
+            "right" => BUTTON_RIGHT,
+            _ => continue,
+        };
+        events.push((f, mask, val != 0));
+    }
+    let max = events.iter().map(|e| e.0).max().unwrap_or(0);
+    let mut inputs = vec![0u8; max + 1];
+    let mut cur = 0u8;
+    let mut idx = 0;
+    for f in 0..=max {
+        while idx < events.len() && events[idx].0 == f {
+            let (_, mask, down) = events[idx];
+            if down {
+                cur |= mask;
+            } else {
+                cur &= !mask;
+            }
+            idx += 1;
+        }
+        inputs[f] = cur;
+    }
+    inputs.extend(std::iter::repeat(cur).take(300));
+    inputs
+}
+
 fn build_preset_tricks(mode: &str, fpg_x: i32) -> Vec<TriggerRule> {
     let mut rules = Vec::new();
     match mode {
@@ -403,7 +453,7 @@ fn main() {
         eprintln!(
             "Uso: playbot <rom> <outdir> [--frames N] [--scale N] \
              [--trick showcase|speedrun|fpg|double-friction|minus] \
-             [--fpg-x 3036] [--macro \"regla1;regla2\"]"
+             [--fpg-x 3036] [--macro \"regla1;regla2\"] [--script route_script.txt]"
         );
         std::process::exit(2);
     }
@@ -415,6 +465,7 @@ fn main() {
     let mut trick_mode = String::from("showcase");
     let mut fpg_x: i32 = 3036; // Cresta del ultimo escalon en 1-1
     let mut custom_macro_dsl = String::new();
+    let mut script_path: Option<String> = None;
 
     let mut i = 3;
     while i < args.len() {
@@ -452,14 +503,34 @@ fn main() {
                     custom_macro_dsl.push_str(&args[i]);
                 }
             }
+            "--script" => {
+                i += 1;
+                if i < args.len() {
+                    script_path = Some(args[i].clone());
+                }
+            }
             _ => {}
         }
         i += 1;
     }
 
+    let script_inputs: Option<Vec<u8>> = script_path
+        .as_deref()
+        .map(|p| parse_route_script(p));
+    if let Some(inputs) = &script_inputs {
+        eprintln!(
+            "[SCRIPT] replay de {} frames desde {} (modo determinista deepscan)",
+            inputs.len(),
+            script_path.as_deref().unwrap_or("?")
+        );
+    }
+
     let mut rules = build_preset_tricks(&trick_mode, fpg_x);
     if !custom_macro_dsl.is_empty() {
         rules.extend(parse_macro_rules(&custom_macro_dsl));
+    }
+    if script_inputs.is_some() {
+        rules.clear();
     }
 
     let cart = Cartridge::load(&rom).expect("No se pudo cargar la ROM");
@@ -511,7 +582,32 @@ fn main() {
 
         let mut buttons = 0u8;
 
-        if phase == 0 {
+        if let Some(inputs) = &script_inputs {
+            buttons = inputs
+                .get(frame as usize)
+                .copied()
+                .unwrap_or_else(|| inputs.last().copied().unwrap_or(0));
+            if phase == 0
+                && op == 0x01
+                && (1..=3).contains(&timer)
+                && st == 0x08
+                && x > 30
+                && on_ground
+            {
+                phase = 1;
+                level_start_frame = frame;
+                let msg = format!(
+                    "[BOOT] Nivel iniciado en frame={frame} | x={x} | frame_rule($077F)={fr_timer} | sub($0705)={sub_mf}"
+                );
+                eprintln!("{msg}");
+                audit_log.push_str(&format!("{msg}\n"));
+            }
+            if on_ground {
+                air_frames = 0;
+            } else {
+                air_frames += 1;
+            }
+        } else if phase == 0 {
             if op == 0x01 && (1..=3).contains(&timer) && st == 0x08 && x > 30 && on_ground {
                 phase = 1;
                 level_start_frame = frame;

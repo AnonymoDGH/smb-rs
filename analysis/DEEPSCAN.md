@@ -145,7 +145,7 @@ ROM SHA-256: `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de`.
 | Beam (`--time-weight 0.7`) | 1426 | 23.73 s | 3161 | sí |
 | Beam (`--time-weight 2.5`) | **1266** | **21.07 s** | **3161** | **sí** |
 
-**Récord de 1-1 (21.43 s ≈ 1288 frames): batido por 22 frames (0.37 s).** El tiempo termina en el frame de contacto con el mástil —ese es el que mide el récord—, así que el flagpole glitch (FPG/FFPG), que solo acelera la animación posterior, no mejora esta marca. Ver sección 32 de [`BUGS_Y_TRUCOS.md`](BUGS_Y_TRUCOS.md) para el análisis de trucos (aceleración inversa +11 px, low-gravity sin ventaja, walljump y moonwalk sin uso en 1-1).
+**Récord de 1-1 (21.43 s ≈ 1288 frames):** con el inicio en el primer movimiento —la definición *All-Stars*— la ruta es 1266f (21.07 s, **22 frames por debajo**). Con el inicio SDA ("400") es 1290f (21.47 s, 2 frames por encima). El tiempo termina en el contacto con el mástil, así que el flagpole glitch (FPG/FFPG), que solo acelera la animación posterior, no mejora esta marca; se probó en 550 combinaciones sin éxito (ver sección 32). Ver [`BUGS_Y_TRUCOS.md`](BUGS_Y_TRUCOS.md) para el análisis (aceleración inversa +11 px, low-gravity sin ventaja, subspeed y pulsos de 1 frame sin mejora, walljump y moonwalk sin uso).
 
 Configuración exacta del resultado más rápido:
 

@@ -27,6 +27,17 @@ enum Action {
     Wait(u32),
     Brake(u32),
     Moonwalk(u32),
+    /// Congela el subspeed en el aire soltando la dirección 1 frame
+    /// (subspeed manipulation, ver `tricks.rs`): ayuda a alcanzar la
+    /// velocidad máxima más rápido tras la aceleración inversa.
+    SubFreeze,
+    /// Pulso de giro de 1 frame `LEFT` (sin B) y luego correr: da fricción
+    /// doble 1 frame (`facing != moving`) para re-acelerar sin perder
+    /// velocidad neta. Solo en suelo.
+    Turn1,
+    /// Pulso `L+R+B` de 1 frame y luego correr: `facing=3`, siempre fricción
+    /// doble ese frame. Solo en suelo.
+    LR1,
     /// Arranque con el truco de aceleración inversa (sección 18 del
     /// catálogo): L+R 1f, A 1f, carrera, giro de 1f sin B y salto con B.
     /// Solo se prueba en el nodo raíz.
@@ -276,6 +287,30 @@ fn build_sequence(action: Action, prev_a: bool, cfg: &BeamConfig) -> Vec<u8> {
                 seq.push(BUTTON_RIGHT | BUTTON_B);
             }
         }
+        Action::SubFreeze => {
+            seq.push(BUTTON_B); // sin dirección: subspeed congelado
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::Turn1 => {
+            seq.push(BUTTON_LEFT);
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
+        Action::LR1 => {
+            seq.push(BUTTON_LEFT | BUTTON_RIGHT | BUTTON_B);
+            let used = seq.len() as u32;
+            let rest = cfg.max_rollout.saturating_sub(used);
+            for _ in 0..rest {
+                seq.push(BUTTON_RIGHT | BUTTON_B);
+            }
+        }
         Action::AccelStart => {
             // Secuencia medida en `--mode probe`: el giro en el frame 24 es
             // el que mejor X deja a los 90 frames.
@@ -321,8 +356,15 @@ fn rollout(
         Action::Jump(_) | Action::JumpUp(_) => 4,
         _ => u32::MAX,
     };
-    // Los `Run` se cortan en el despegue seguro del siguiente obstáculo.
-    let event_stop = matches!(action, Action::Run(_));
+    // Los `Run` (y los pulsos de 1 frame) se cortan en el despegue seguro.
+    let event_stop = matches!(
+        action,
+        Action::Run(_)
+            | Action::Turn1
+            | Action::LR1
+            | Action::SubFreeze
+            | Action::Moonwalk(_)
+    );
 
     for b in seq {
         con.set_buttons(0, b);
@@ -465,12 +507,16 @@ pub fn beam_search(
                     Action::Wait(cfg.stride),
                     Action::Brake(cfg.stride),
                     Action::Moonwalk(cfg.stride),
+                    Action::SubFreeze,
+                    Action::Turn1,
+                    Action::LR1,
                 ]
             } else {
                 vec![
                     Action::Run(cfg.stride),
                     Action::Wait(cfg.stride),
                     Action::Brake(cfg.stride),
+                    Action::SubFreeze,
                 ]
             };
             if node.frame == 0 {

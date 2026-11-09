@@ -145,7 +145,7 @@ ROM SHA-256: `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de`.
 | Beam (`--time-weight 0.7`) | 1426 | 23.73 s | 3161 | yes |
 | Beam (`--time-weight 2.5`) | **1266** | **21.07 s** | **3161** | **yes** |
 
-**1-1 record (21.43 s ≈ 1288 frames): beaten by 22 frames (0.37 s).** The time ends on the pole-touch frame — what the record measures — so the flagpole glitch (FPG/FFPG), which only skips the later animation, does not improve this mark. See section 32 of [`BUGS_Y_TRUCOS.md`](BUGS_Y_TRUCOS.md) for the trick analysis (reverse acceleration +11 px, low gravity with no advantage, walljump and moonwalk unused in 1-1).
+**1-1 record (21.43 s ≈ 1288 frames):** with the start at first movement (the *All-Stars* definition) the route is 1266f (21.07 s, **22 frames under**). With the SDA "400" start it is 1290f (21.47 s, 2 frames over). The time ends on the pole touch, so the flagpole glitch (FPG/FFPG), which only skips the later animation, does not improve this mark; it was probed in 550 combos with no success (see section 32). See [`BUGS_Y_TRUCOS.md`](BUGS_Y_TRUCOS.md) for the analysis (reverse acceleration +11 px, low gravity with no advantage, subspeed and 1-frame pulses with no gain, walljump/moonwalk unused).
 
 Exact configuration for the fastest result:
 

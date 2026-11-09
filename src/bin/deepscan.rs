@@ -1128,6 +1128,14 @@ fn run_trick_probe(rom: &[u8], outdir: &Path) {
     );
 
     let results = probe_start(&mut con, &snap);
+    let exhaustive = smb_rs::route::tricks::probe_exhaustive_prefix(&mut con, &snap);
+    println!("\nExhaustivo (2 frames + correr hasta 60): top 10");
+    for r in exhaustive.iter().take(10) {
+        println!(
+            "  {:<20} x={:4} vx={:2} max_vx={}",
+            r.name, r.x, r.vx, r.max_vx
+        );
+    }
     let mut md = String::from("# deepscan probe — trucos de arranque (1-1)\n\n");
     md.push_str(&format!(
         "Snapshot de inicio: x={} y={} vx={} (boot {} frames).\n\n",
@@ -1156,6 +1164,14 @@ fn run_trick_probe(rom: &[u8], outdir: &Path) {
                 r.name, r.frames, r.x, r.vx, r.max_vx, r.peak_height, r.landed
             ));
         }
+    }
+
+    md.push_str("\n## Exhaustivo: 2 frames + correr (hasta 60f)\n\n");
+    md.push_str("| prueba | frames | x | vx | max_vx | altura | aterrizaje | flag |\n");
+    md.push_str("|---|---:|---:|---:|---:|---:|---:|---|\n");
+    for r in exhaustive.iter().take(30) {
+        md.push_str(&probe_row(r));
+        md.push('\n');
     }
 
     std::fs::write(outdir.join("trick_probe.md"), md).expect("error trick_probe.md");
