@@ -692,6 +692,7 @@ fn run_global(rom: &[u8], sha: &str, args: &Args) -> GlobalStats {
         max_rollout: args.max_rollout,
         time_weight: args.time_weight,
         verbose: !args.quiet,
+        goal_mode: smb_rs::route::GoalMode::Flagpole,
     };
 
     let cart = Cartridge::from_bytes(rom).expect("cartucho inválido");

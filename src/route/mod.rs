@@ -20,7 +20,7 @@ pub mod sensors;
 pub mod tricks;
 
 pub use beam::{
-    beam_search, boot_to_level, inputs_to_script, BeamConfig, BeamResult, BeamTrace,
+    beam_search, boot_to_level, inputs_to_script, BeamConfig, BeamResult, BeamTrace, GoalMode,
 };
 pub use map::{EnemySighting, LevelMap, Obstacle, ObstacleKind, RouteMarker};
 pub use physics::{fall_time, jump_arc, JumpArc};

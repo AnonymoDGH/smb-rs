@@ -61,6 +61,17 @@ struct Node {
     last_x: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GoalMode {
+    /// Mástil (niveles no-warp): state==3 / sub 4/5 / $070F.
+    Flagpole,
+    /// Entrada en tubería warp: `GameEngineSubroutine == 7` y `$0750` activo,
+    /// en la zona de warps (X > goal_x).
+    Warp,
+    /// Hacha de castillo: `OperMode == 2` (sprites invisibles, fin SDA 8-4).
+    Axe,
+}
+
 #[derive(Clone, Debug)]
 pub struct BeamConfig {
     pub beam_width: usize,
@@ -70,6 +81,7 @@ pub struct BeamConfig {
     pub max_rollout: u32,
     pub time_weight: f64,
     pub verbose: bool,
+    pub goal_mode: GoalMode,
 }
 
 impl Default for BeamConfig {
@@ -86,6 +98,7 @@ impl Default for BeamConfig {
             // beam premiaba saltos de 40 frames sobre correr 8.
             time_weight: 2.5,
             verbose: true,
+            goal_mode: GoalMode::Flagpole,
         }
     }
 }
@@ -404,7 +417,17 @@ fn rollout(
             child.dead = true;
             break;
         }
-        if s.state == 3 || s.sub == 4 || s.sub == 5 || s.flagpole_y != 0 {
+        // Objetivo según modo: mástil / warp (sub==7) / hacha (OperMode==2).
+        // El detector de tubería usa $0750 != 0 (AreaPointer cargado).
+        let area_ptr = con.bus.ram[0x0750];
+        let goal_hit = match cfg.goal_mode {
+            GoalMode::Flagpole => {
+                s.state == 3 || s.sub == 4 || s.sub == 5 || s.flagpole_y != 0
+            }
+            GoalMode::Warp => s.sub == 7 && area_ptr != 0 && s.x > cfg.goal_x - 400,
+            GoalMode::Axe => s.op == 0x02,
+        };
+        if goal_hit {
             child.reached_goal = true;
             break;
         }
