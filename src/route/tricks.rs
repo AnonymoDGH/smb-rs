@@ -521,6 +521,11 @@ pub struct TrickReport {
     pub flagpole_y: u8,
     pub flagpole_score: u8,
     pub flagpole_window: bool,
+    /// Primer frame con `GameEngineSubroutine == 5` (caminata al castillo
+    /// tras el slide). Para niveles no-castillo marca coste completo del nivel.
+    pub castle_frame: Option<u32>,
+    /// Primer frame con `OperMode == 2` (victoria / hacha de 8-4).
+    pub victory_frame: Option<u32>,
     pub events: Vec<String>,
 }
 
@@ -541,6 +546,10 @@ impl TrickReport {
         md.push_str(&format!(
             "- Primer salto: frame {:?}, airtime {:?}\n",
             self.first_jump_frame, self.first_jump_airtime
+        ));
+        md.push_str(&format!(
+            "- Castillo (sub 5): {:?}\n- Victoria (OperMode 2): {:?}\n",
+            self.castle_frame, self.victory_frame
         ));
         md.push_str(&format!(
             "- Flagpole: frame {:?}, Y={}, score={}, ventana subpíxel={}\n\n",
@@ -624,6 +633,17 @@ pub fn analyze_tricks(samples: &[(u32, u8, TrickState)]) -> TrickReport {
             }
         }
         prev_ground = s.on_ground;
+
+        if s.sub == 5 && rep.castle_frame.is_none() {
+            rep.castle_frame = Some(frame);
+            rep.events
+                .push(format!("castillo (sub 5) en frame {frame}"));
+        }
+        if s.op == 2 && rep.victory_frame.is_none() {
+            rep.victory_frame = Some(frame);
+            rep.events
+                .push(format!("victoria (OperMode 2, hacha) en frame {frame}"));
+        }
 
         if rep.flagpole_frame.is_none() && (s.state == 3 || s.flagpole_y != 0) {
             rep.flagpole_frame = Some(frame);
