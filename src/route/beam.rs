@@ -117,7 +117,7 @@ pub struct BeamTrace {
     pub goal_frame: Option<u32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BeamResult {
     /// Botones frame a frame desde el inicio del nivel (sin el boot).
     pub level_inputs: Vec<u8>,
@@ -133,6 +133,9 @@ pub struct BeamResult {
     pub trace: Vec<BeamTrace>,
     pub rollouts: u64,
     pub nodes: u64,
+    /// Snapshot final del mejor nodo (para encadenar niveles con la misma fase).
+    /// `None` si no hubo nodos.
+    pub snap: Option<ConsoleSnapshot>,
 }
 
 struct State {
@@ -671,6 +674,7 @@ pub fn beam_search(
         .expect("beam vacío");
 
     BeamResult {
+        snap: Some(best.snap.clone()),
         level_inputs: best.inputs.clone(),
         inputs: best.inputs,
         frames: best.frame,

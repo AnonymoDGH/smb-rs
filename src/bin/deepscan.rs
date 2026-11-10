@@ -1174,6 +1174,51 @@ fn run_warp_beam(rom: &[u8], sha: &str, args: &Args) {
         inputs_to_script(&result.level_inputs),
     )
     .expect("warp12 script");
+
+    // Encadenar en el MISMO proceso (misma fase): salir de la tuberia y beam
+    // a la tuberia destino de la sala warp (siguiente sub==7).
+    if result.reached_goal {
+        if let Some(snap_pipe) = result.snap.as_ref() {
+            con.restore(snap_pipe);
+            let mut exited = None;
+            for f in 0..600u32 {
+                con.set_buttons(0, 0);
+                con.step_frame();
+                con.bus.apu.samples.clear();
+                if con.bus.ram[0x000E] != 7 {
+                    exited = Some(f);
+                    println!("warpbeam: salida tuberia +{f}f x={} $0750={:02X}", (con.bus.ram[0x6D] as i32)*256+con.bus.ram[0x86] as i32, con.bus.ram[0x0750]);
+                    break;
+                }
+            }
+            if let Some(_) = exited {
+                let snap_room = con.snapshot();
+                let cfg2 = BeamConfig {
+                    beam_width: (args.beam * 2).max(16),
+                    max_frames: 800,
+                    stride: args.stride,
+                    goal_x: 0,
+                    max_rollout: args.max_rollout,
+                    time_weight: args.time_weight,
+                    verbose: !args.quiet,
+                    goal_mode: smb_rs::route::GoalMode::Warp,
+                };
+                println!("warpbeam: beam sala warp goal_x=0 frames=800 beam={}", cfg2.beam_width);
+                let result2 = beam_search(&mut con, &snap_room, &cfg2);
+                println!(
+                    "warpbeam: sala warp {}f x={} warp={} rollouts={}",
+                    result2.frames, result2.x, result2.reached_goal, result2.rollouts
+                );
+                std::fs::write(
+                    args.outdir.join("warproom_route_script.txt"),
+                    inputs_to_script(&result2.level_inputs),
+                )
+                .expect("warproom script");
+            } else {
+                println!("warpbeam: nunca salio de la tuberia en 600f");
+            }
+        }
+    }
 }
 
 fn run_warp12_map(rom: &[u8], sha: &str, args: &Args) {
